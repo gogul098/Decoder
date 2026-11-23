@@ -1,0 +1,34 @@
+# Load balancer -> N API replicas -> Redis queue -> M worker replicas -> Groq (multi-model lanes)
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes: [redisdata:/data]
+    restart: unless-stopped
+
+  api:
+    build: .
+    env_file: .env
+    environment: [REDIS_URL=redis://redis:6379/0]
+    depends_on: [redis]
+    deploy: { replicas: 3 }
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["arq", "app.worker.WorkerSettings"]
+    env_file: .env
+    environment: [REDIS_URL=redis://redis:6379/0]
+    depends_on: [redis]
+    deploy: { replicas: 3 }
+    restart: unless-stopped
+
+  lb:
+    image: nginx:1.27-alpine
+    volumes: [./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro]
+    ports: ["80:80"]
+    depends_on: [api]
+    restart: unless-stopped
+
+volumes:
+  redisdata:
