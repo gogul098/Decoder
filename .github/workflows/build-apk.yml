@@ -1,17 +1,27 @@
-# Builds the Android APK on GitHub's servers (no Android Studio needed on your laptop).
-# Set a repository variable API_BASE (Settings > Secrets and variables > Actions > Variables)
-# to your server address, e.g. https://news.example.com — or set it later inside the app.
+# Builds the Android APK on GitHub's servers and publishes it with an update.json manifest.
+# Installed apps read update.json on launch and offer the new APK when its build number is higher.
+# Changing only config/app.json (the server address) does NOT rebuild: apps read that file directly.
 name: Build APK
 on:
   push:
     branches: [main]
     paths: ["app/**", ".github/workflows/build-apk.yml"]
   workflow_dispatch:
+    inputs:
+      notes:
+        description: "What's new (shown in the app's update card)"
+        required: false
+
+permissions: { contents: write }
 
 jobs:
   apk:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: app } }
+    env:
+      BUILD: ${{ github.run_number }}
+      VERSION: 1.0.${{ github.run_number }}
+      HAS_KEYSTORE: ${{ secrets.KEYSTORE_B64 != '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -19,22 +29,55 @@ jobs:
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 21 }
       # GitHub's Ubuntu runners already ship the Android SDK (ANDROID_HOME), so no setup step is needed
-      - run: echo "Android SDK at $ANDROID_HOME" && ls "$ANDROID_HOME/platforms"
       - run: npm ci
       - run: npm run build
-        env: { VITE_API_BASE: "${{ vars.API_BASE }}" }
+        env:
+          VITE_API_BASE: ${{ vars.API_BASE }}
+          VITE_BUILD: ${{ env.BUILD }}
+          VITE_VERSION: ${{ env.VERSION }}
+          VITE_REPO: ${{ github.repository }}
       - run: npx cap sync android
-      - run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+      # Optional: sign with your own private key stored in secrets (base64 keystore + passwords).
+      - name: Use signing key from secrets
+        if: env.HAS_KEYSTORE == 'true'
+        env: { KEYSTORE_B64: "${{ secrets.KEYSTORE_B64 }}" }
+        run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore" && echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+      - run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon -PversionCode=$BUILD -PversionName=$VERSION
         working-directory: app/android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       - run: cp android/app/build/outputs/apk/debug/app-debug.apk news-decoded.apk
+      - name: Write update manifest
+        env:
+          NOTES_INPUT: ${{ github.event.inputs.notes }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          python3 - <<'PY'
+          import json, os, datetime
+          notes = (os.environ.get("NOTES_INPUT") or os.environ.get("COMMIT_MSG") or "Improvements and fixes").strip()
+          notes = notes.split("\n\n")[0].strip()          # first paragraph of the commit message
+          repo = os.environ["GITHUB_REPOSITORY"]
+          json.dump({
+              "build": int(os.environ["BUILD"]),
+              "version": os.environ["VERSION"],
+              "apk_url": f"https://github.com/{repo}/releases/download/latest/news-decoded.apk",
+              "notes": notes[:300],
+              "published": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+          }, open("update.json", "w"), indent=2)
+          print(open("update.json").read())
+          PY
       - uses: actions/upload-artifact@v4
-        with: { name: news-decoded-apk, path: app/news-decoded.apk }
+        with: { name: news-decoded-apk, path: "app/news-decoded.apk" }
       - name: Publish as "latest" release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: News Decoded (latest build)
-          files: app/news-decoded.apk
+          name: Decoded (latest build)
+          body: "Build ${{ env.BUILD }} · version ${{ env.VERSION }}. Install news-decoded.apk on Android. Installed apps update themselves from update.json."
+          files: |
+            app/news-decoded.apk
+            app/update.json
           make_latest: true
-    permissions: { contents: write }

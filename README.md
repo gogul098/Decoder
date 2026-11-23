@@ -96,6 +96,27 @@ docker compose up -d --build         # nginx + 3 API + 3 workers + Redis
 4. Install it on your phone (allow "install unknown apps"). If you skipped step 2, open ⚙ in the app and
    enter the server address.
 
+## Updates: new APKs and server moves
+
+**New app version.** Push changes under `app/` to `main`. GitHub Actions builds a new APK, numbers it
+(`1.0.<build>`), and publishes it with `update.json` in the **latest** release. Every installed app checks
+`update.json` when it opens or comes back to the foreground (at most every 10 minutes). When a newer build
+exists, it shows an **Update available** card with the first paragraph of your commit message as
+"what's new". **Download update** fetches the APK, which you then open to install over the old app.
+"Later" snoozes it for 12 hours. Settings also has **Check for updates**. To write the notes yourself,
+run the workflow by hand (Actions → Build APK → Run workflow) and fill in "What's new".
+
+**Server moved (new Render link).** Edit `config/app.json`, set `api_base` to the new address and push.
+No APK rebuild is needed. Apps read this file on launch, and again whenever the server stays unreachable
+for 20 seconds, then switch over and show "Switched to the new server". An address typed by hand in
+Settings always wins; **Use default server** goes back to the published one.
+
+**Signing.** Android only installs an update over an existing app if both APKs are signed with the same
+key, so every build is signed with `app/android/app/decoded.keystore`. Because this repo is public, anyone
+could use that key. For a private key, create your own keystore and add the repository secrets
+`KEYSTORE_B64` (the keystore file, base64-encoded), `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`.
+The workflow then signs with it instead. Switching keys means everyone reinstalls once.
+
 ## Local development
 
 ```bash

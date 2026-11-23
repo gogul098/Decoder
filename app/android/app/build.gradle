@@ -7,8 +7,9 @@ android {
         applicationId "com.gogul.newsdecoded"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // CI passes the GitHub run number, so every build is newer than the last
+        versionCode((project.findProperty("versionCode") ?: "1") as Integer)
+        versionName((project.findProperty("versionName") ?: "1.0.0") as String)
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +17,23 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // One fixed signing key for every build. Android only installs an update over an
+    // installed app when both are signed with the same key. CI can override it with
+    // the KEYSTORE_* secrets; otherwise the key in this folder is used.
+    signingConfigs {
+        shared {
+            storeFile file(System.getenv("KEYSTORE_FILE") ?: "decoded.keystore")
+            storePassword System.getenv("KEYSTORE_PASSWORD") ?: "decodedapp"
+            keyAlias System.getenv("KEY_ALIAS") ?: "decoded"
+            keyPassword System.getenv("KEY_PASSWORD") ?: "decodedapp"
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.shared
+        }
         release {
+            signingConfig signingConfigs.shared
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

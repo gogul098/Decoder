@@ -2,7 +2,7 @@ import "@fontsource-variable/inter";
 import "@fontsource-variable/newsreader";
 import "@fontsource-variable/newsreader/wght-italic.css";
 import "./style.css";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
 
 const view = document.getElementById("view");
 const page = document.getElementById("page");
@@ -15,7 +15,12 @@ const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
-const apiBase = () => (store.get("api", import.meta.env.VITE_API_BASE || "") || "").replace(/\/+$/, "");
+// Server address, in order: one the user typed in Settings > the address published in the
+// repo's config/app.json (so moving the Render server needs no new APK) > the one built in.
+const apiBase = () => (store.get("api", "") || store.get("api_remote", "") || import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
+const BUILD = Number(import.meta.env.VITE_BUILD || 0);
+const VERSION = import.meta.env.VITE_VERSION || "dev";
+const REPO = import.meta.env.VITE_REPO || "gogul098/Decoder";
 
 const CATS = [
   { id: "tech", label: "Tech & AI" },
@@ -67,7 +72,13 @@ function connectLive() {
   const wake = setTimeout(() => { if (liveEl.dataset.state !== "live") setLive("connecting", "Waking server…"); }, 4000);
   es = new EventSource(apiBase() + "/api/stream");
   es.onopen = () => { clearTimeout(wake); setLive("live", "Live"); };
-  es.onerror = () => setLive("connecting", "Reconnecting");   // EventSource retries on its own
+  let downSince = 0;
+  es.onerror = () => {                                        // EventSource retries on its own
+    setLive("connecting", "Reconnecting");
+    downSince = downSince || Date.now();
+    if (Date.now() - downSince > 20000) { downSince = Date.now(); checkConfig(); }   // maybe the server moved
+  };
+  es.addEventListener("open", () => { downSince = 0; });
   es.addEventListener("snapshot", (e) => {
     const d = JSON.parse(e.data);
     state.feeds[d.category] = d;
@@ -154,6 +165,84 @@ function turnPage(dir, render) {
   const done = () => { wrap.remove(); shade.remove(); };
   sheet.addEventListener("animationend", (e) => { if (e.target === sheet) done(); });
   setTimeout(done, 1400);
+}
+
+// ---------------- updates & remote config ----------------
+// Each GitHub build publishes update.json next to the APK; the repo holds config/app.json with
+// the server address. Native HTTP is used so GitHub's download links work without CORS issues.
+async function httpJSON(url) {
+  if (isNative) {
+    const r = await CapacitorHttp.get({ url, headers: { "Cache-Control": "no-cache" }, connectTimeout: 8000, readTimeout: 8000 });
+    if (r.status >= 400) throw new Error(`HTTP ${r.status}`);
+    return typeof r.data === "string" ? JSON.parse(r.data) : r.data;
+  }
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+function toast(text) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.textContent = text;
+  document.body.appendChild(t);
+  setTimeout(() => t.classList.add("out"), 3200);
+  setTimeout(() => t.remove(), 3700);
+}
+
+async function checkConfig() {
+  try {
+    const cfg = await httpJSON(`https://raw.githubusercontent.com/${REPO}/main/config/app.json?t=${Date.now()}`);
+    const remote = (cfg.api_base || "").trim().replace(/\/+$/, "");
+    if (!remote || remote === store.get("api_remote", "")) return;
+    const before = apiBase();
+    store.set("api_remote", remote);
+    if (apiBase() !== before) {                // only when the user hasn't typed their own address
+      state.feeds = {};
+      connectLive();
+      if (current.name === "home") home(current.cat);
+      toast(before ? "Switched to the new server" : "Connected to the server");
+    }
+  } catch { /* offline or GitHub unreachable: try again next launch */ }
+}
+
+async function checkUpdate({ manual = false } = {}) {
+  if (!isNative && !manual) return null;       // the web preview has nothing to install
+  const info = await httpJSON(`https://github.com/${REPO}/releases/download/latest/update.json?t=${Date.now()}`);
+  if (!(info.build > BUILD)) return { info, newer: false };
+  const snoozed = JSON.parse(store.get("update_snooze", "{}"));
+  if (!manual && snoozed.build === info.build && Date.now() - snoozed.at < 12 * 3600e3) return { info, newer: true };
+  showUpdate(info);
+  return { info, newer: true };
+}
+
+function showUpdate(info) {
+  if (document.querySelector(".sheet-wrap")) return;
+  const wrap = document.createElement("div");
+  wrap.className = "sheet-wrap";
+  wrap.innerHTML = `
+    <div class="scrim"></div>
+    <div class="update box" role="dialog" aria-labelledby="upd-title">
+      <span class="tag">Update available</span>
+      <h2 id="upd-title">Version ${esc(info.version)} is ready</h2>
+      <p class="upd-notes">${esc(info.notes || "Improvements and fixes.")}</p>
+      <p class="note">You have ${esc(VERSION)}. Tap download, then open the file when it finishes to install. Android may ask once to allow installs from your browser.</p>
+      <div class="upd-actions"><button class="btn solid" id="upd-go">Download update</button><button class="btn" id="upd-later">Later</button></div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => { wrap.classList.add("out"); setTimeout(() => wrap.remove(), 250); };
+  wrap.querySelector("#upd-go").addEventListener("click", () => { openExternal(info.apk_url); close(); });
+  const later = () => { store.set("update_snooze", JSON.stringify({ build: info.build, at: Date.now() })); close(); };
+  wrap.querySelector("#upd-later").addEventListener("click", later);
+  wrap.querySelector(".scrim").addEventListener("click", later);
+}
+
+let lastChecks = 0;
+function backgroundChecks() {
+  if (Date.now() - lastChecks < 10 * 60e3) return;   // at most every 10 minutes
+  lastChecks = Date.now();
+  checkConfig();
+  checkUpdate().catch(() => {});
 }
 
 // ---------------- screens ----------------
@@ -346,9 +435,30 @@ function settingsView() {
       <h1 style="font-size:32px;margin-bottom:4px">Settings</h1>
       <div class="field"><label for="api">Server address</label>
         <input id="api" type="url" inputmode="url" autocomplete="off" placeholder="https://news.example.com" value="${esc(apiBase())}"></div>
-      <button class="btn solid" id="save">Save and connect</button>
+      <div class="upd-actions"><button class="btn solid" id="save">Save and connect</button>
+        ${store.get("api", "") ? `<button class="btn" id="reset">Use default server</button>` : ""}</div>
       <p id="msg" class="note"></p>
+      <h2 class="sec" style="--c:var(--mint)">App version</h2>
+      <p style="margin:0 0 12px">Decoded ${esc(VERSION)}${BUILD ? ` · build ${BUILD}` : ""}</p>
+      <button class="btn" id="check">Check for updates</button>
+      <p id="umsg" class="note"></p>
     </div>`;
+  view.querySelector("#reset")?.addEventListener("click", () => {
+    store.set("api", "");
+    state.feeds = {};
+    connectLive();
+    settingsView();
+    view.querySelector("#msg").textContent = apiBase() ? "Using the default server: " + apiBase() : "No default server is published yet.";
+  });
+  view.querySelector("#check").addEventListener("click", async () => {
+    const m = view.querySelector("#umsg");
+    m.className = "note"; m.textContent = "Checking…";
+    try {
+      const r = await checkUpdate({ manual: true });
+      m.className = "note ok";
+      m.textContent = r.newer ? `Version ${r.info.version} is available.` : "You're on the latest version.";
+    } catch { m.className = "note bad"; m.textContent = "Couldn't check right now. Try again later."; }
+  });
   view.querySelector("#save").addEventListener("click", async () => {
     const msg = view.querySelector("#msg");
     const v = view.querySelector("#api").value.trim();
@@ -382,12 +492,13 @@ function route() {
 window.addEventListener("hashchange", route);
 route();
 connectLive();
+backgroundChecks();
 
 if (isNative) {
   import("@capacitor/app").then(({ App }) => {
     App.addListener("backButton", () => {
       if (current.name === "home") App.exitApp(); else location.hash = `#/c/${store.get("cat", "tech")}`;
     });
-    App.addListener("resume", () => { if (!es || es.readyState === 2) connectLive(); });
+    App.addListener("resume", () => { if (!es || es.readyState === 2) connectLive(); backgroundChecks(); });
   });
 }

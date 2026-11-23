@@ -222,3 +222,20 @@ main { max-width: 660px; margin: 0 auto; padding: 4px 20px calc(env(safe-area-in
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- update card & toast ---------- */
+.sheet-wrap { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; justify-content: center; padding: 16px 14px calc(env(safe-area-inset-bottom) + 16px); }
+.scrim { position: absolute; inset: 0; background: rgba(20, 18, 12, .35); animation: fadein .2s ease both; }
+.update { position: relative; width: min(100%, 520px); padding: 20px 20px 18px; border-radius: 14px; animation: sheetUp .35s cubic-bezier(.2, .8, .2, 1.1) both; }
+.update h2 { font: 500 26px/1.15 var(--serif); margin: 2px 0 8px; }
+.upd-notes { font: 17px/1.5 var(--serif); color: var(--ink2); margin: 0 0 8px; }
+.upd-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.sheet-wrap.out .update { animation: sheetDown .25s ease forwards; }
+.sheet-wrap.out .scrim { animation: fadein .25s ease reverse forwards; }
+@keyframes sheetUp { from { transform: translateY(110%); } }
+@keyframes sheetDown { to { transform: translateY(120%); } }
+@keyframes fadein { from { opacity: 0; } }
+.toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 72px); white-space: nowrap; z-index: 70; translate: -50% 0; padding: 10px 16px;
+  font: 600 14px var(--sans); color: #161614; background: var(--mint); border: var(--bw) solid #161614; border-radius: 999px;
+  box-shadow: 2px 2px 0 #161614; animation: drop .3s ease both; transition: opacity .4s, transform .4s; }
+.toast.out { opacity: 0; transform: translateY(-10px); }
