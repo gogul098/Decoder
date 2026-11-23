@@ -6,6 +6,7 @@ services:
   - type: web
     name: decoded-api
     runtime: python
+    region: singapore   # same region as the Key Value (jobpilot-redis), and close to India
     rootDir: backend
     plan: free
     buildCommand: pip install -r requirements.txt
