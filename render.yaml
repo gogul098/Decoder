@@ -1,5 +1,7 @@
-# Render Blueprint — free plan, one service + free Key Value (Redis).
-# Render dashboard → New → Blueprint → pick this repo. It asks for GROQ_API_KEYS once.
+# Render Blueprint — free plan, one web service.
+# Render allows only ONE free Key Value per workspace, so this reuses the one you already have:
+# when the Blueprint asks for REDIS_URL, paste that Key Value's *Internal* URL with /1 at the end
+# (database 1), so this app's keys stay separate from your other project's (database 0).
 services:
   - type: web
     name: decoded-api
@@ -27,13 +29,5 @@ services:
       - key: GROQ_API_KEYS
         sync: false
       - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: decoded-redis
-          property: connectionString
+        sync: false
 
-  - type: keyvalue
-    name: decoded-redis
-    plan: free
-    ipAllowList: []               # only reachable from your Render services
-    maxmemoryPolicy: allkeys-lru  # old cached stories are evicted first
