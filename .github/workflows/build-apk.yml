@@ -13,12 +13,13 @@ jobs:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: app } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with: { node-version: 22, cache: npm, cache-dependency-path: app/package-lock.json }
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 21 }
-      - uses: android-actions/setup-android@v3
+      # GitHub's Ubuntu runners already ship the Android SDK (ANDROID_HOME), so no setup step is needed
+      - run: echo "Android SDK at $ANDROID_HOME" && ls "$ANDROID_HOME/platforms"
       - run: npm ci
       - run: npm run build
         env: { VITE_API_BASE: "${{ vars.API_BASE }}" }
