@@ -82,6 +82,10 @@ class Broadcaster:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import os
+    if os.getenv("RENDER") and "REDIS_URL" not in os.environ:
+        raise RuntimeError("REDIS_URL is not set. In Render open this service → Environment → add REDIS_URL "
+                           "= your Key Value's Internal URL (e.g. redis://red-xxxx:6379/1), then redeploy.")
     app.state.r = redis_client()
     app.state.q = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     app.state.bal = Balancer(app.state.r)
