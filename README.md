@@ -2,8 +2,9 @@
 
 Live top-5 news in **Tech & AI, Indian Politics, World Politics, Terror & Security**. Each story is
 decoded into the core idea, what changed, why, how, when, who it affects, the backstory built from
-earlier news, and a readable narrative you can also **listen** to. The app has a minimal paper design:
-cards are sheets with a folded corner that curls when touched, and opening a story turns the page.
+earlier news, and a readable narrative you can also **listen** to. The design is paper meets neo-brutalism:
+thick ink outlines, hard shadows and a colour per story; cards are sheets with a folded corner that curls
+when touched, and opening a story flips the page over to a colour-printed back before tossing it away.
 
 ```
  RSS (Google News) ──► ingester (cron in the workers, every 15 min)

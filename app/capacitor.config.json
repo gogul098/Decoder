@@ -2,6 +2,6 @@
   "appId": "com.gogul.newsdecoded",
   "appName": "Decoded",
   "webDir": "dist",
-  "android": { "allowMixedContent": true, "backgroundColor": "#eeece6" },
+  "android": { "allowMixedContent": true, "backgroundColor": "#f4efe4" },
   "server": { "androidScheme": "https", "cleartext": true }
 }
