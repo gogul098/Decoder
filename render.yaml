@@ -1,0 +1,39 @@
+# Render Blueprint — free plan, one service + free Key Value (Redis).
+# Render dashboard → New → Blueprint → pick this repo. It asks for GROQ_API_KEYS once.
+services:
+  - type: web
+    name: decoded-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # One process: the API + SSE streams + the embedded queue worker (decoding + RSS ingester).
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips "*"
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: EMBEDDED_WORKER
+        value: "1"
+      - key: WORKER_CONCURRENCY
+        value: "4"
+      - key: CLIENT_RPM
+        value: "120"
+      - key: NEWS_REGION
+        value: IN
+      - key: FEED_TTL_SECONDS
+        value: "900"
+      - key: GROQ_API_KEYS
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: decoded-redis
+          property: connectionString
+
+  - type: keyvalue
+    name: decoded-redis
+    plan: free
+    ipAllowList: []               # only reachable from your Render services
+    maxmemoryPolicy: allkeys-lru  # old cached stories are evicted first

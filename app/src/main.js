@@ -63,8 +63,10 @@ function connectLive() {
   if (es) es.close();
   if (!apiBase()) { setLive("off", "Offline"); return; }
   setLive("connecting", "Connecting");
+  // free hosting sleeps when idle and takes ~1 min to wake; say so instead of looking stuck
+  const wake = setTimeout(() => { if (liveEl.dataset.state !== "live") setLive("connecting", "Waking server…"); }, 4000);
   es = new EventSource(apiBase() + "/api/stream");
-  es.onopen = () => setLive("live", "Live");
+  es.onopen = () => { clearTimeout(wake); setLive("live", "Live"); };
   es.onerror = () => setLive("connecting", "Reconnecting");   // EventSource retries on its own
   es.addEventListener("snapshot", (e) => {
     const d = JSON.parse(e.data);
@@ -74,8 +76,10 @@ function connectLive() {
   });
   es.addEventListener("update", (e) => {
     const d = JSON.parse(e.data);
-    const had = state.feeds[d.category]?.stories?.length;
-    if (!had || !(current.name === "home" && current.cat === d.category)) {
+    const prev = state.feeds[d.category];
+    const had = prev?.stories?.length;
+    const stale = !prev || Date.now() / 1000 - prev.updated > 1800;   // old list from before the server slept
+    if (!had || stale || !(current.name === "home" && current.cat === d.category)) {
       state.feeds[d.category] = d;                  // nobody is looking at it: swap silently
       if (current.name === "home" && current.cat === d.category) renderList(d.category);
     } else {

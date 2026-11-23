@@ -87,7 +87,23 @@ async def lifespan(app: FastAPI):
     app.state.bal = Balancer(app.state.r)
     app.state.hub = Broadcaster(app.state.r)
     app.state.hub.start()
+    worker = None
+    if settings.embedded_worker:
+        # Free hosting runs one service, so the queue worker (decoding + RSS ingester cron)
+        # lives inside the API process. The queue/worker design is unchanged: switch this off
+        # and run `arq app.worker.WorkerSettings` separately to scale out again.
+        from arq.worker import Worker
+        from .worker import WorkerSettings as W
+        worker = Worker(functions=W.functions, cron_jobs=W.cron_jobs, redis_settings=W.redis_settings,
+                        on_startup=W.on_startup, on_shutdown=W.on_shutdown, max_jobs=W.max_jobs,
+                        handle_signals=False)
+        app.state.worker_task = asyncio.create_task(worker.async_run())
     yield
+    if worker:
+        await worker.close()
+        app.state.worker_task.cancel()
+        with contextlib.suppress(BaseException):
+            await app.state.worker_task
     await app.state.hub.stop()
     await app.state.q.aclose()
     await app.state.bal.http.aclose()
@@ -107,7 +123,8 @@ def sse(event: str, data) -> str:
 @app.middleware("http")
 async def per_client_limit(request: Request, call_next):
     if request.url.path.startswith("/api/") and request.url.path != "/api/health":
-        ip = request.headers.get("x-real-ip") or (request.client.host if request.client else "?")
+        fwd = request.headers.get("x-forwarded-for", "").split(",")[0].strip()   # behind Render / proxies
+        ip = request.headers.get("x-real-ip") or fwd or (request.client.host if request.client else "?")
         key = f"rl:{ip}:{int(time.time() // 60)}"
         r = request.app.state.r
         n = await r.incr(key)
@@ -132,14 +149,18 @@ async def stream(request: Request):
     async def gen():
         with hub.listen(NEWS_CHANNEL) as q:
             yield "retry: 3000\n\n"
-            empty = False
+            empty = stale = False
             for cat in news.CATEGORIES:
                 snap = await snapshot(r, cat)
                 empty |= not snap["stories"]
+                stale |= time.time() - snap["updated"] > settings.feed_ttl
                 yield sse("snapshot", snap)
-            if empty:   # first boot: ask a worker to ingest now (deduplicated by job id)
+            if empty or stale:
+                # first boot, or the server was asleep (free hosting): ingest now. The fresh
+                # top 5 then arrives on this same stream as an "update". Deduplicated per minute.
                 await request.app.state.q.enqueue_job("ingest_all", _job_id=f"ingest:{int(time.time() // 60)}")
-                yield sse("status", {"message": "Collecting today's news…"})
+                if empty:
+                    yield sse("status", {"message": "Collecting today's news…"})
             while not await request.is_disconnected():
                 try:
                     data = await asyncio.wait_for(q.get(), HEARTBEAT)

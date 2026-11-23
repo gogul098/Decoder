@@ -55,26 +55,42 @@ Tested here with sample news and a stand-in LLM: 300 readers opening 20 stories 
 exactly 20 model calls, all done in 1.2 s, spread over the 6 models by weight. An ingest published while
 a phone was connected arrived on its stream immediately.
 
-## 1. Run the backend (server)
+## 1. Run the backend on Render (free)
 
-Your laptop doesn't need to run this. Use any Linux server with Docker, for example an
-Oracle Cloud *Always Free* VM, or a GitHub Codespace for quick testing.
+`render.yaml` sets up everything: one free web service (API + live streams + the queue worker in one
+process) and one free Key Value (Redis).
+
+1. Push this repo to your GitHub.
+2. Go to dashboard.render.com, then **New → Blueprint**, and pick the repo.
+3. When asked for `GROQ_API_KEYS`, paste your Groq key (several keys can be separated by commas).
+4. Deploy. Your server is at `https://decoded-api.onrender.com` (or similar). Open `/api/health` to check it.
+
+What to expect on the free plan:
+- **It sleeps after 15 minutes without visitors.** Opening the app wakes it up in about a minute. The app
+  shows "Waking server…", then loads the stories it already has and fetches fresh news right away.
+- **No news is collected while it sleeps**, so the first list after a long break may be old. It's
+  replaced automatically within a few seconds.
+- **The free Redis can be wiped when Render restarts it.** Nothing important is lost: the news is
+  fetched again and stories are decoded again on demand.
+- It runs as a single process. The queue, workers, multi-model balancer and SSE fan-out all still work;
+  they just share one small machine.
+
+### Scaling up later
+
+The same code runs the full high-traffic setup. Set `EMBEDDED_WORKER=0` and run separate workers, either
+with Render paid services (a web service plus a background worker running `arq app.worker.WorkerSettings`)
+or with Docker on any server:
 
 ```bash
-git clone <your repo> && cd <repo>/backend
-cp .env.example .env          # paste your Groq key(s) into GROQ_API_KEYS
-docker compose up -d --build  # nginx on port 80
-curl http://localhost/api/health
+cd backend && cp .env.example .env   # add GROQ_API_KEYS
+docker compose up -d --build         # nginx + 3 API + 3 workers + Redis
 ```
-
-Check your real per-model limits at console.groq.com → Settings → Limits and adjust `GROQ_MODELS`
-(`model:requests_per_minute:weight`). Put HTTPS in front (e.g. Cloudflare Tunnel or Caddy) if you
-share the app.
 
 ## 2. Get the APK (no Android Studio needed)
 
 1. Push this repo to GitHub.
-2. Optional: Settings → Secrets and variables → Actions → **Variables** → `API_BASE` = your server address.
+2. Optional: Settings → Secrets and variables → Actions → **Variables** → `API_BASE` = your Render URL
+   (e.g. `https://decoded-api.onrender.com`).
 3. Actions tab → **Build APK** → Run workflow. In about 5 min the APK is under the run's artifacts and in
    the release named **latest**.
 4. Install it on your phone (allow "install unknown apps"). If you skipped step 2, open ⚙ in the app and
@@ -102,6 +118,7 @@ cd app && npm install && npm run dev      # then set the server to http://localh
 | `PREWARM` | `0` | `1` = decode every top story before anyone opens it (instant, but uses more Groq quota) |
 | `WORKER_CONCURRENCY` | `8` | Jobs per worker process |
 | `CLIENT_RPM` | `60` | Requests per minute allowed per phone/IP |
+| `EMBEDDED_WORKER` | `0` | `1` = run the queue worker inside the API process (used on Render Free) |
 
 News comes from Google News RSS (headlines and short snippets only). The AI writes only from those
 headlines, so the app shows every source and says when something is unclear.

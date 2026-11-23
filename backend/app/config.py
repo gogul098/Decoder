@@ -52,6 +52,8 @@ class Settings:
     worker_concurrency: int = int(os.getenv("WORKER_CONCURRENCY", "8"))
     client_rpm: int = int(os.getenv("CLIENT_RPM", "60"))        # per-IP API limit
     region: str = os.getenv("NEWS_REGION", "IN")                 # Google News edition
+    # Run the queue worker inside the API process (one-service hosting such as Render Free)
+    embedded_worker: bool = os.getenv("EMBEDDED_WORKER", "0") == "1"
 
 
 settings = Settings()
