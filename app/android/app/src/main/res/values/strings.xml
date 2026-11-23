@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">News Decoded</string>
-    <string name="title_activity_main">News Decoded</string>
+    <string name="app_name">Decoded</string>
+    <string name="title_activity_main">Decoded</string>
     <string name="package_name">com.gogul.newsdecoded</string>
     <string name="custom_url_scheme">com.gogul.newsdecoded</string>
 </resources>

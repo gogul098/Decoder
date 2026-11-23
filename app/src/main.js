@@ -1,31 +1,31 @@
-import "@fontsource/orbitron/700.css";
-import "@fontsource/orbitron/900.css";
-import "@fontsource/space-grotesk/400.css";
-import "@fontsource/space-grotesk/600.css";
-import "@fontsource/space-grotesk/700.css";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/newsreader";
+import "@fontsource-variable/newsreader/wght-italic.css";
 import "./style.css";
 import { Capacitor } from "@capacitor/core";
 
 const view = document.getElementById("view");
+const page = document.getElementById("page");
+const liveEl = document.getElementById("live");
 const isNative = Capacitor.isNativePlatform();
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-// ---------- settings ----------
+// ---------------- settings ----------------
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
-const DEFAULT_API = import.meta.env.VITE_API_BASE || "";
-const apiBase = () => (store.get("api", DEFAULT_API) || "").replace(/\/+$/, "");
+const apiBase = () => (store.get("api", import.meta.env.VITE_API_BASE || "") || "").replace(/\/+$/, "");
 
 const CATS = [
   { id: "tech", label: "Tech & AI" },
-  { id: "india", label: "Indian Politics" },
-  { id: "world", label: "World Politics" },
-  { id: "security", label: "Terror & Security" },
+  { id: "india", label: "India" },
+  { id: "world", label: "World" },
+  { id: "security", label: "Security" },
 ];
-const catLabel = (id) => CATS.find((c) => c.id === id)?.label || id;
+const catLabel = (id) => ({ tech: "Tech & AI", india: "Indian politics", world: "World politics", security: "Terror & security" }[id] || id);
 
-// ---------- helpers ----------
+// ---------------- helpers ----------------
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 function ago(ts) {
   const m = Math.max(1, Math.round((Date.now() / 1000 - ts) / 60));
@@ -33,29 +33,62 @@ function ago(ts) {
   const h = Math.round(m / 60);
   return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
 }
-async function api(path) {
-  if (!apiBase()) throw new Error("NO_API");
+const today = () => new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
+async function getJSON(path) {
   const r = await fetch(apiBase() + path, { headers: { Accept: "application/json" } });
-  if (!r.ok) {
-    let msg = `Server error ${r.status}`;
-    try { msg = (await r.json()).detail || msg; } catch {}
-    throw new Error(msg);
-  }
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `Server error ${r.status}`);
   return r.json();
 }
 async function openExternal(url) {
-  if (isNative) {
-    const { Browser } = await import("@capacitor/browser");
-    await Browser.open({ url });
-  } else window.open(url, "_blank", "noopener");
+  if (isNative) { const { Browser } = await import("@capacitor/browser"); await Browser.open({ url }); }
+  else window.open(url, "_blank", "noopener");
 }
-const feedCache = {};
-let runId = 0;  // cancels polling when the user navigates away
+const icon = {
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>',
+};
 
-// ---------- speech ----------
+// ---------------- live news (SSE) ----------------
+// One stream, opened when the app starts. The server sends today's top 5 for every
+// category straight from Redis, then pushes new stories whenever the ingester publishes.
+const state = { feeds: {}, pending: {}, status: "" };
+let es = null;
+function setLive(s, text) { liveEl.dataset.state = s; liveEl.querySelector("span").textContent = text; }
+
+function connectLive() {
+  if (es) es.close();
+  if (!apiBase()) { setLive("off", "Offline"); return; }
+  setLive("connecting", "Connecting");
+  es = new EventSource(apiBase() + "/api/stream");
+  es.onopen = () => setLive("live", "Live");
+  es.onerror = () => setLive("connecting", "Reconnecting");   // EventSource retries on its own
+  es.addEventListener("snapshot", (e) => {
+    const d = JSON.parse(e.data);
+    state.feeds[d.category] = d;
+    delete state.pending[d.category];
+    if (current.name === "home" && current.cat === d.category) renderList(d.category);
+  });
+  es.addEventListener("update", (e) => {
+    const d = JSON.parse(e.data);
+    const had = state.feeds[d.category]?.stories?.length;
+    if (!had || !(current.name === "home" && current.cat === d.category)) {
+      state.feeds[d.category] = d;                  // nobody is looking at it: swap silently
+      if (current.name === "home" && current.cat === d.category) renderList(d.category);
+    } else {
+      state.pending[d.category] = d;                // don't move a list under someone's thumb
+      showFresh(d.category);
+    }
+  });
+  es.addEventListener("status", (e) => {
+    state.status = JSON.parse(e.data).message;
+    if (current.name === "home") renderList(current.cat);
+  });
+}
+
+// ---------------- speech ----------------
 let speaking = false;
 async function speak(text, btn) {
-  const set = (on) => { speaking = on; if (btn) btn.innerHTML = on ? "■ Stop" : "▶ Listen"; };
+  const set = (on) => { speaking = on; if (btn) btn.innerHTML = `${on ? icon.stop : icon.play}${on ? "Stop" : "Listen"}`; };
   if (speaking) { await stopSpeech(); set(false); return; }
   set(true);
   try {
@@ -65,8 +98,7 @@ async function speak(text, btn) {
       set(false);
     } else if ("speechSynthesis" in window) {
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = "en-IN";
-      u.onend = u.onerror = () => set(false);
+      u.lang = "en-IN"; u.onend = u.onerror = () => set(false);
       speechSynthesis.speak(u);
     } else set(false);
   } catch { set(false); }
@@ -79,150 +111,246 @@ async function stopSpeech() {
   speaking = false;
 }
 
-// ---------- screens ----------
-function needSetup() {
-  view.innerHTML = `<section class="fade error">
-    <h2 style="margin-top:0">Connect your server</h2>
-    <p>The app needs the address of your News Decoded backend (the server that talks to Groq).</p>
-    <a class="btn alt" href="#/settings">Open settings</a></section>`;
+// ---------------- page turn ----------------
+// The old page is copied onto a sheet that curls away (forward) or peels off to the
+// right (back), uncovering the new page underneath.
+function turnPage(dir, render) {
+  if (reduced || !current.name) { render(); return; }
+  const y = window.scrollY;
+  const wrap = document.createElement("div");
+  wrap.className = "turn-wrap";
+  const sheet = document.createElement("div");
+  sheet.className = "turn";
+  const copy = page.cloneNode(true);
+  copy.removeAttribute("id");
+  copy.classList.add("frozen");
+  copy.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+  copy.style.transform = `translateY(${-y}px)`;
+  sheet.appendChild(copy);
+  wrap.appendChild(sheet);
+  const shade = document.createElement("div");
+  shade.className = "under-shadow";
+  render();
+  document.body.append(shade, wrap);
+  requestAnimationFrame(() => sheet.classList.add(dir === "back" ? "bwd" : "fwd"));
+  const done = () => { wrap.remove(); shade.remove(); };
+  sheet.addEventListener("animationend", (e) => { if (e.target === sheet) done(); });
+  setTimeout(done, 1200);
 }
 
-async function home(cat) {
+// ---------------- screens ----------------
+const current = { name: "", cat: "", id: "" };
+const scrollMemo = {};
+
+function needSetup() {
+  view.innerHTML = `<div class="notice" style="margin-top:24px"><h2>Connect your server</h2>
+    <p>Decoded needs the address of your backend, the server that collects the news and talks to Groq.</p>
+    <a class="btn solid" href="#/settings">Open settings</a></div>`;
+}
+
+function home(cat) {
   cat = CATS.some((c) => c.id === cat) ? cat : store.get("cat", "tech");
   store.set("cat", cat);
-  view.innerHTML = `<section class="intro fade">
-      <h1>Top 5. Decoded.</h1>
-      <p>Tap a story to see what changed, why it happened, who it hits and the backstory.</p>
-    </section>
+  Object.assign(current, { name: "home", cat });
+  view.innerHTML = `
+    <p class="dateline">${esc(today())}</p>
+    <h1 class="title">Today's top five</h1>
     <nav class="tabs" role="tablist">${CATS.map((c) =>
       `<button class="tab" role="tab" aria-selected="${c.id === cat}" data-cat="${c.id}">${esc(c.label)}</button>`).join("")}</nav>
-    <div class="meta"><span id="updated">Tuning in…</span><button class="btn-ghost" id="refresh">↻ Refresh</button></div>
-    <div id="list">${'<div class="skel"></div>'.repeat(5)}</div>`;
-  view.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => { location.hash = `#/c/${b.dataset.cat}`; }));
-  view.querySelector("#refresh").addEventListener("click", () => { delete feedCache[cat]; home(cat); });
+    <div id="fresh"></div>
+    <div id="list"></div>`;
+  view.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.cat !== cat) history.replaceState(null, "", `#/c/${b.dataset.cat}`), home(b.dataset.cat);
+  }));
   if (!apiBase()) return needSetup();
+  renderList(cat);
+  if (state.pending[cat]) showFresh(cat);
+}
 
-  const list = view.querySelector("#list");
-  try {
-    const data = feedCache[cat] && Date.now() - feedCache[cat].at < 120000 ? feedCache[cat].data : await api(`/api/feed/${cat}`);
-    feedCache[cat] = { at: Date.now(), data };
-    if (store.get("cat") !== cat) return;
-    view.querySelector("#updated").textContent = `${catLabel(cat)} · updated ${ago(data.updated)}`;
-    if (!data.stories.length) { list.innerHTML = `<p class="note">No stories right now. Try refresh.</p>`; return; }
-    list.innerHTML = data.stories.map((s, i) => `
-      <a class="card fade" style="animation-delay:${i * 60}ms" href="#/s/${s.id}">
-        <div class="rank">${String(i + 1).padStart(2, "0")}</div>
+function renderList(cat, highlight = []) {
+  const list = document.getElementById("list");
+  if (!list) return;
+  const feed = state.feeds[cat];
+  if (!feed) { list.innerHTML = '<div class="skel"></div>'.repeat(5); return; }
+  if (!feed.stories.length) {
+    list.innerHTML = `<div class="empty"><p style="margin:0;color:var(--ink2)">${esc(state.status || "No stories yet. They'll appear here the moment they arrive.")}</p></div>`;
+    return;
+  }
+  list.innerHTML = feed.stories.map((s, i) => `
+    <a class="sheet${highlight.includes(s.id) ? " new" : ""}" href="#/s/${s.id}" style="animation-delay:${i * 50}ms">
+      <div class="leaf">
+        <div class="num">${i + 1}</div>
         <div><h2>${esc(s.title)}</h2>
-          <div class="sub"><span class="pill">${s.outlets} outlet${s.outlets > 1 ? "s" : ""}</span><span>${ago(s.published)}</span><span>${esc(s.sources[0]?.name || "")}</span></div>
-        </div></a>`).join("");
-  } catch (e) {
-    if (e.message === "NO_API") return needSetup();
-    list.innerHTML = `<div class="error"><b>Can't reach the server.</b><p>${esc(e.message)}</p><a class="btn alt" href="#/settings">Check settings</a></div>`;
+          <div class="meta"><span>${s.outlets} ${s.outlets > 1 ? "outlets" : "outlet"}</span><span>${ago(s.published)}</span><span>${esc(s.sources[0]?.name || "")}</span></div>
+        </div>
+      </div></a>`).join("");
+  list.querySelectorAll(".sheet").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    a.classList.add("curl");                       // the corner lifts first, then the page turns
+    setTimeout(() => { location.hash = a.getAttribute("href"); }, reduced ? 0 : 170);
+  }));
+}
+
+function showFresh(cat) {
+  const box = document.getElementById("fresh");
+  if (!box || current.cat !== cat) return;
+  box.innerHTML = `<div class="fresh"><button>New stories · show</button></div>`;
+  box.querySelector("button").addEventListener("click", () => {
+    const old = new Set((state.feeds[cat]?.stories || []).map((s) => s.id));
+    state.feeds[cat] = state.pending[cat];
+    delete state.pending[cat];
+    box.innerHTML = "";
+    renderList(cat, state.feeds[cat].stories.filter((s) => !old.has(s.id)).map((s) => s.id));
+    window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
+  });
+}
+
+let decodeSrc = null;
+function story(id) {
+  Object.assign(current, { name: "story", id });
+  stopSpeech();
+  const known = Object.values(state.feeds).flatMap((f) => f.stories).find((s) => s.id === id);
+  view.innerHTML = `
+    <div class="story-top"><a class="back" href="#/c/${store.get("cat", "tech")}">← Top five</a></div>
+    <article class="paper">
+      ${known ? `<p class="kicker">${esc(catLabel(known.category))} · ${known.outlets} outlets · ${ago(known.published)}</p>
+      <h1>${esc(known.title)}</h1>` : ""}
+      <ol class="steps">
+        <li data-s="queued"><i></i>Waiting for a free model</li>
+        <li data-s="finding"><i></i>Reading earlier coverage</li>
+        <li data-s="writing"><i></i>Writing the story</li>
+      </ol>
+      <div class="lines">${'<span style="width:%"></span>'.repeat(5).replace(/%/g, () => 60 + Math.round(Math.random() * 40) + "%")}</div>
+    </article>`;
+  if (!apiBase()) return needSetup();
+  decode(id);
+}
+
+function setStage(stage, extra = {}) {
+  const order = ["queued", "finding", "writing"];
+  const at = order.indexOf(stage);
+  view.querySelectorAll(".steps li").forEach((li, i) => {
+    li.className = i < at ? "done" : i === at ? "on" : "";
+  });
+  if (stage === "writing" && extra.leads !== undefined) {
+    const li = view.querySelector('.steps li[data-s="finding"]');
+    if (li) li.lastChild.textContent = `Read ${extra.leads} earlier report${extra.leads === 1 ? "" : "s"}`;
   }
 }
 
-async function story(id) {
-  const my = ++runId;
-  await stopSpeech();
-  const known = Object.values(feedCache).flatMap((f) => f.data.stories).find((s) => s.id === id);
-  view.innerHTML = `<a class="back" href="#/c/${store.get("cat", "tech")}">← Top 5</a>
-    ${known ? `<div class="kicker">${esc(catLabel(known.category))}</div><h2 style="margin:0 0 6px;font-size:20px">${esc(known.title)}</h2>` : ""}
-    <div class="decoding"><div class="ring"></div><h2 id="stage">DECODING SIGNAL</h2><p id="sub">Reading earlier coverage to work out why…</p></div>`;
-  if (!apiBase()) return needSetup();
-  const lines = { queued: "In the queue, a model is about to pick it up…", decoding: "Reading earlier coverage to work out why…" };
-  let delay = 900;
-  for (let tries = 0; tries < 120; tries++) {
-    if (my !== runId) return;
-    try {
-      const d = await api(`/api/decode/${id}`);
-      if (my !== runId) return;
-      if (d.status === "ready") return renderStory(d.result);
-      if (d.status === "error") throw new Error(d.message);
-      const sub = view.querySelector("#sub");
-      if (sub) sub.textContent = lines[d.status] || lines.decoding;
-    } catch (e) {
-      if (my !== runId) return;
-      view.querySelector(".decoding")?.remove();
-      view.insertAdjacentHTML("beforeend", `<div class="error fade"><b>Couldn't decode this one.</b><p>${esc(e.message)}</p>
-        <button class="btn alt" id="retry">Try again</button></div>`);
-      view.querySelector("#retry").addEventListener("click", () => story(id));
-      return;
-    }
-    await new Promise((r) => setTimeout(r, delay));
-    delay = Math.min(2500, delay * 1.15);
-  }
+function decode(id) {
+  if (decodeSrc) decodeSrc.close();
+  const mine = id;
+  let finished = false;
+  const fail = (msg) => {
+    finished = true;
+    if (current.id !== mine || current.name !== "story") return;
+    view.querySelector(".steps")?.remove(); view.querySelector(".lines")?.remove();
+    view.querySelector(".paper").insertAdjacentHTML("beforeend",
+      `<div class="notice" style="box-shadow:none;padding:0;margin-top:18px"><p>${esc(msg)}</p><button class="btn" id="retry">Try again</button></div>`);
+    view.querySelector("#retry").addEventListener("click", () => story(mine));
+  };
+  const src = (decodeSrc = new EventSource(`${apiBase()}/api/decode/${id}/stream`));
+  src.addEventListener("progress", (e) => { const d = JSON.parse(e.data); if (current.id === mine) setStage(d.stage, d); });
+  src.addEventListener("ready", (e) => { finished = true; src.close(); if (current.id === mine && current.name === "story") renderStory(JSON.parse(e.data).result); });
+  src.addEventListener("error", (e) => {
+    if (e.data) { src.close(); fail(JSON.parse(e.data).message); return; }
+    if (finished) return;
+    src.close();                                      // stream broke: fall back to polling once a second
+    poll(mine, fail);
+  });
+}
+
+async function poll(id, fail, tries = 0) {
+  if (current.id !== id || current.name !== "story") return;
+  try {
+    const d = await getJSON(`/api/decode/${id}`);
+    if (d.stage === "ready") return renderStory(d.result);
+    if (d.stage === "error") return fail(d.message);
+    setStage(d.stage, d);
+  } catch (e) { if (tries > 5) return fail("Can't reach the server. Check your connection."); }
+  setTimeout(() => poll(id, fail, tries + 1), 1200);
 }
 
 function renderStory(d) {
   const s = d.story || {};
-  const qa = [["WHAT CHANGED", d.what_changed], ["WHY", d.why], ["HOW", d.how], ["WHEN", d.when]].filter(([, v]) => v);
+  const qa = [["What changed", d.what_changed], ["Why", d.why], ["How", d.how], ["When", d.when]].filter(([, v]) => v);
   const sources = [
     ...(s.sources || []).map((x) => ({ name: x.name, title: x.title, url: x.url })),
     ...(d.leads || []).map((x) => ({ name: x.source, title: x.title, url: x.url, earlier: true })),
   ];
-  view.innerHTML = `<article class="story fade">
-    <a class="back" href="#/c/${store.get("cat", "tech")}">← Top 5</a>
-    <div class="kicker">${esc(catLabel(s.category))} · ${s.outlets || 1} outlets · ${ago(s.published || Date.now() / 1000)}</div>
-    <h1>${esc(d.headline || s.title)}</h1>
-    ${d.hook ? `<p class="hook">${esc(d.hook)}</p>` : ""}
-    <div class="actions"><button class="btn" id="listen">▶ Listen</button>
-      ${s.sources?.[0]?.url ? `<button class="btn alt" id="orig">Original report</button>` : ""}</div>
-    <div class="core"><b>THE CORE IDEA</b><p>${esc(d.core_idea)}</p></div>
-    <div class="qa">${qa.map(([k, v]) => `<div class="q"><h3>${k}</h3><p>${esc(v)}</p></div>`).join("")}</div>
-    ${d.who_affected?.length ? `<h2 class="sec">Who it affects</h2><div class="who">${d.who_affected.map((w) =>
-      `<div><strong>${esc(w.group)}</strong><span>${esc(w.impact)}</span></div>`).join("")}</div>` : ""}
-    ${d.backstory?.length ? `<h2 class="sec">The backstory</h2><ol class="timeline">${d.backstory.map((b) =>
-      `<li>${b.date ? `<time>${esc(b.date)}</time>` : ""}${esc(b.event)}</li>`).join("")}</ol>` : ""}
-    ${d.narrative?.length ? `<h2 class="sec">The full story</h2><div class="narrative">${d.narrative.map((p) => `<p>${esc(p)}</p>`).join("")}</div>` : ""}
-    ${d.watch_next ? `<h2 class="sec">Watch next</h2><div class="watch">${esc(d.watch_next)}</div>` : ""}
-    ${d.confidence_note ? `<p class="note">${esc(d.confidence_note)}</p>` : ""}
-    <h2 class="sec">Sources</h2><div class="sources">${sources.map((x, i) =>
-      `<a href="${esc(x.url)}" data-i="${i}"><b>${esc(x.name)}</b>${x.earlier ? " · earlier" : ""}: ${esc(x.title)}</a>`).join("")}</div>
-    <p class="small">Written by AI (${esc(d.model)}) from the headlines above. Check the sources for anything important.</p>
-  </article>`;
+  view.innerHTML = `
+    <div class="story-top"><a class="back" href="#/c/${store.get("cat", "tech")}">← Top five</a>
+      <button class="btn" id="listen">${icon.play}Listen</button></div>
+    <article class="paper">
+      <p class="kicker">${esc(catLabel(s.category))} · ${s.outlets || 1} outlets · ${ago(s.published || Date.now() / 1000)}</p>
+      <h1>${esc(d.headline || s.title)}</h1>
+      ${d.hook ? `<p class="hook">${esc(d.hook)}</p>` : ""}
+      <div class="core"><p class="label">The core idea</p><p>${esc(d.core_idea)}</p></div>
+      ${qa.length ? `<dl class="qa">${qa.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl>` : ""}
+      ${d.who_affected?.length ? `<h2 class="sec">Who it affects</h2><div class="who">${d.who_affected.map((w) =>
+        `<div><b>${esc(w.group)}</b>${w.impact ? ` <span>· ${esc(w.impact)}</span>` : ""}</div>`).join("")}</div>` : ""}
+      ${d.backstory?.length ? `<h2 class="sec">How we got here</h2><ol class="timeline">${d.backstory.map((b) =>
+        `<li>${b.date ? `<time>${esc(b.date)}</time>` : ""}${esc(b.event)}</li>`).join("")}</ol>` : ""}
+      ${d.narrative?.length ? `<h2 class="sec">The full story</h2><div class="narrative">${d.narrative.map((p) => `<p>${esc(p)}</p>`).join("")}</div>` : ""}
+      ${d.watch_next ? `<h2 class="sec">What to watch next</h2><p class="watch">${esc(d.watch_next)}</p>` : ""}
+      ${d.confidence_note ? `<p class="note">${esc(d.confidence_note)}</p>` : ""}
+      <h2 class="sec">Sources</h2>
+      <div class="sources">${sources.map((x, i) => `<a href="${esc(x.url)}" data-i="${i}"><b>${esc(x.name)}</b>${x.earlier ? " · earlier" : ""} — ${esc(x.title)}</a>`).join("")}</div>
+      <p class="fine">Written by AI (${esc(d.model)}) from the reports listed above. Check them for anything important.</p>
+    </article>`;
   const script = [d.headline, d.hook, "The core idea. " + d.core_idea, d.what_changed && "What changed. " + d.what_changed,
     d.why && "Why. " + d.why, ...(d.narrative || [])].filter(Boolean).join("\n\n");
   const lb = view.querySelector("#listen");
   lb.addEventListener("click", () => speak(script, lb));
-  view.querySelector("#orig")?.addEventListener("click", () => openExternal(s.sources[0].url));
   view.querySelectorAll(".sources a").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); openExternal(sources[+a.dataset.i].url); }));
-  window.scrollTo(0, 0);
 }
 
 function settingsView() {
-  view.innerHTML = `<section class="fade">
-    <a class="back" href="#/">← Back</a>
-    <h1 style="font:800 28px var(--display);margin:6px 0">Settings</h1>
-    <div class="field"><label for="api">Server address</label>
-      <input id="api" type="url" inputmode="url" placeholder="https://your-server.example.com" value="${esc(apiBase())}">
-      <span class="note" style="margin:0">Where your News Decoded backend runs.</span></div>
-    <div class="actions"><button class="btn" id="save">Save & test</button></div>
-    <p id="msg"></p></section>`;
+  Object.assign(current, { name: "settings" });
+  view.innerHTML = `
+    <div class="story-top"><a class="back" href="#/">← Back</a></div>
+    <div class="paper">
+      <h1 style="font-size:32px;margin-bottom:4px">Settings</h1>
+      <div class="field"><label for="api">Server address</label>
+        <input id="api" type="url" inputmode="url" autocomplete="off" placeholder="https://news.example.com" value="${esc(apiBase())}"></div>
+      <button class="btn solid" id="save">Save and connect</button>
+      <p id="msg" class="note"></p>
+    </div>`;
   view.querySelector("#save").addEventListener("click", async () => {
-    const v = view.querySelector("#api").value.trim();
-    store.set("api", v);
     const msg = view.querySelector("#msg");
-    msg.textContent = "Testing…";
-    try { await api("/api/categories"); msg.textContent = "✔ Connected."; Object.keys(feedCache).forEach((k) => delete feedCache[k]); }
-    catch (e) { msg.textContent = "✖ " + (e.message === "NO_API" ? "Enter an address first." : e.message); }
+    const v = view.querySelector("#api").value.trim();
+    if (!v) { msg.className = "note bad"; msg.textContent = "Enter an address first."; return; }
+    store.set("api", v);
+    msg.className = "note"; msg.textContent = "Connecting…";
+    try { await getJSON("/api/categories"); msg.className = "note ok"; msg.textContent = "Connected. News will stream in live."; state.feeds = {}; connectLive(); }
+    catch (e) { msg.className = "note bad"; msg.textContent = "Couldn't connect: " + e.message; }
   });
 }
 
-// ---------- router ----------
+// ---------------- router ----------------
 function route() {
-  runId++;
+  const prev = current.name;
+  if (prev === "home") scrollMemo.home = window.scrollY;
   const h = location.hash.replace(/^#\/?/, "").split("/");
-  document.body.classList.toggle("is-home", !h[0] || h[0] === "c");
-  if (h[0] === "s" && h[1]) story(h[1]);
-  else if (h[0] === "settings") settingsView();
-  else home(h[0] === "c" ? h[1] : undefined);
+  const go = h[0] === "s" && h[1] ? () => { story(h[1]); window.scrollTo(0, 0); }
+    : h[0] === "settings" ? () => { settingsView(); window.scrollTo(0, 0); }
+    : () => { home(h[0] === "c" ? h[1] : undefined); window.scrollTo(0, scrollMemo.home || 0); };
+  const forward = (h[0] === "s" || h[0] === "settings") && prev === "home";
+  const backward = prev && prev !== "home" && !(h[0] === "s" || h[0] === "settings");
+  if (forward) turnPage("fwd", go);
+  else if (backward) { if (decodeSrc) decodeSrc.close(); stopSpeech(); turnPage("back", go); }
+  else go();
 }
 window.addEventListener("hashchange", route);
 route();
+connectLive();
 
 if (isNative) {
-  import("@capacitor/app").then(({ App }) => App.addListener("backButton", () => {
-    if (location.hash && location.hash !== "#/" && !location.hash.startsWith("#/c/")) history.back();
-    else App.exitApp();
-  }));
+  import("@capacitor/app").then(({ App }) => {
+    App.addListener("backButton", () => {
+      if (current.name === "home") App.exitApp(); else location.hash = `#/c/${store.get("cat", "tech")}`;
+    });
+    App.addListener("resume", () => { if (!es || es.readyState === 2) connectLive(); });
+  });
 }

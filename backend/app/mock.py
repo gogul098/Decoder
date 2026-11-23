@@ -43,7 +43,7 @@ def mock_items(category: str) -> list[dict]:
     for i, (title, outlets) in enumerate(_SAMPLE[category]):
         for j, o in enumerate(outlets):
             items.append({
-                "title": title if j == 0 else title.replace("Sample: ", "Sample: Report - "),
+                "title": title,
                 "source": o, "url": f"https://example.com/{category}/{i}/{j}",
                 "published": now - (i * 2 + j) * H,
                 "summary": f"Sample summary for testing: {title}. Further details reported by {o}.",

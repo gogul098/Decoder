@@ -1,6 +1,10 @@
 """Queue workers (arq). Run as many copies as you like:  arq app.worker.WorkerSettings
-Each copy handles WORKER_CONCURRENCY jobs at once; all copies share the Redis queue and
-the Redis-backed model balancer, so adding workers never overshoots Groq's limits."""
+
+Two kinds of work:
+  * ingest_all (cron, every FEED_TTL): RSS -> rank -> Redis -> publish on news:updates
+  * decode_story (queued on demand): previous news leads -> Groq (via the balancer) -> Redis,
+    publishing progress on decode:<id> so the app sees it live.
+The cron runs on every worker, but a Redis lock lets only one of them ingest each category."""
 from __future__ import annotations
 
 import json
@@ -10,10 +14,10 @@ from arq import cron, func
 from arq.connections import RedisSettings
 
 from . import news
-from .balancer import Balancer, LLMError
+from .balancer import Balancer
 from .config import settings
 from .explain import build_messages, validate
-from .store import get_json, redis_client, refresh_feed
+from .store import decode_channel, get_json, ingest, redis_client, set_status
 
 log = logging.getLogger("worker")
 
@@ -22,7 +26,7 @@ async def startup(ctx):
     ctx["r"] = redis_client()
     ctx["bal"] = Balancer(ctx["r"])
     await ctx["bal"].discover()
-    log.info("worker ready with %d lanes", len(ctx["bal"].lanes))
+    log.info("worker ready with %d model lanes", len(ctx["bal"].lanes))
 
 
 async def shutdown(ctx):
@@ -32,39 +36,45 @@ async def shutdown(ctx):
 
 async def decode_story(ctx, story_id: str) -> str:
     r = ctx["r"]
-    if await r.exists(f"explain:{story_id}"):
+    done = await r.get(f"explain:{story_id}")
+    if done:
+        await r.publish(decode_channel(story_id), json.dumps({"stage": "ready", "result": json.loads(done)}))
         return "cached"
     story = await get_json(r, f"story:{story_id}")
     if not story:
-        await r.set(f"explain:{story_id}:status", "error:story expired, pull to refresh", ex=600)
+        await set_status(r, story_id, "error:This story has expired. Pull down to refresh.", ttl=60)
         return "missing"
-    await r.set(f"explain:{story_id}:status", "decoding", ex=600)
     try:
+        await set_status(r, story_id, "finding")
         leads = await news.previous_leads(story)
+        await set_status(r, story_id, "writing", leads=len(leads))
         raw, model = await ctx["bal"].chat_json(build_messages(story, leads))
         result = validate(raw)
-    except (LLMError, Exception) as e:  # noqa: BLE001 — any failure becomes a readable status
+    except Exception as e:  # noqa: BLE001 — any failure becomes a readable status
         log.exception("decode failed for %s", story_id)
-        await r.set(f"explain:{story_id}:status", f"error:{str(e)[:160]}", ex=120)
+        await set_status(r, story_id, f"error:{str(e)[:160]}", ttl=60)
         return "error"
     result.update({"id": story_id, "model": model, "story": story,
                    "leads": [{k: l[k] for k in ("title", "source", "url", "published")} for l in leads]})
     await r.set(f"explain:{story_id}", json.dumps(result), ex=settings.explain_ttl)
     await r.delete(f"explain:{story_id}:status")
+    await r.publish(decode_channel(story_id), json.dumps({"stage": "ready", "result": result}))
     return "ok"
 
 
-async def refresh_all(ctx):
+async def ingest_all(ctx):
     for cat in news.CATEGORIES:
-        stories = await refresh_feed(ctx["r"], cat)
+        stories = await ingest(ctx["r"], cat)
         if settings.prewarm:
             for s in stories:
                 await ctx["redis"].enqueue_job("decode_story", s["id"], _job_id=f"decode:{s['id']}")
 
 
 class WorkerSettings:
-    functions = [func(decode_story, keep_result=0, timeout=180, max_tries=2)]
-    cron_jobs = [cron(refresh_all, minute=set(range(0, 60, max(1, settings.feed_ttl // 60))), run_at_startup=True)]
+    functions = [func(decode_story, keep_result=0, timeout=180, max_tries=2),
+                 func(ingest_all, keep_result=0, timeout=300)]
+    cron_jobs = [cron(ingest_all, minute=set(range(0, 60, max(1, settings.feed_ttl // 60))),
+                      run_at_startup=True, unique=True)]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(settings.redis_url)

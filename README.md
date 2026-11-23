@@ -1,38 +1,57 @@
-# News Decoded
+# Decoded
 
-Live top-5 news in **Tech & AI, Indian Politics, World Politics, Terror & Security**, each story
-decoded into: the core idea, what changed, why, how, when, who it affects, the backstory built from
-earlier news, and a readable narrative you can also **listen** to. Synthwave-styled Android app.
+Live top-5 news in **Tech & AI, Indian Politics, World Politics, Terror & Security**. Each story is
+decoded into the core idea, what changed, why, how, when, who it affects, the backstory built from
+earlier news, and a readable narrative you can also **listen** to. The app has a minimal paper design:
+cards are sheets with a folded corner that curls when touched, and opening a story turns the page.
 
 ```
- Android app ──► nginx (load balancer, least-busy + retry)
-                   │
-          ┌────────┼────────┐
-        api #1   api #2   api #3        FastAPI: feeds, story status, per-IP limits
-          └────────┼────────┘
-                 Redis  ◄── queue + cache + shared model budgets
-          ┌────────┼────────┐
-       worker #1 worker #2 worker #3   arq: 8 jobs each, fetch previous news, call Groq
-          └────────┼────────┘
-        Groq: 6 models = 6 separate rate-limit lanes (more keys from other orgs = more lanes)
+ RSS (Google News) ──► ingester (cron in the workers, every 15 min)
+                          │ writes today's top 5 to Redis + PUBLISH news:updates
+                          ▼
+                        Redis ◄──────────── queue + cache + shared model budgets
+                          │ one subscription per API process
+          ┌───────────────┼───────────────┐
+        api #1          api #2          api #3     (behind nginx, least-busy routing)
+          │  SSE  /api/stream             │  SSE  /api/decode/<id>/stream
+          ▼                               ▼
+     every open app: gets the top 5 instantly from Redis, then live pushes
+     (phones never call RSS, and never talk to Redis directly)
+
+ Open a story ─► queue ─► worker: earlier coverage ─► Groq (6 models, balanced) ─► Redis
+                                   └─ PUBLISH decode:<id> progress: queued → finding → writing → ready
 ```
+
+## Live news flow (SSE + Redis pub/sub)
+
+- **Only the ingester touches RSS.** It runs inside the workers every `FEED_TTL_SECONDS`. A Redis lock
+  makes sure only one worker ingests each category. It stores the ranked top 5 in Redis and publishes
+  on `news:updates` only when the list changes.
+- **The app opens one SSE stream at launch** (`/api/stream`). It immediately receives the current top 5
+  for all four categories from Redis, then gets each new list the moment it's published. If you're
+  looking at the list, a "New stories · show" pill appears instead of moving cards under your thumb.
+- **Phones don't subscribe to Redis directly.** That would expose your database to the internet, and every
+  phone would need its own Redis connection. Instead each API process keeps **one** Redis subscription
+  and fans the messages out to all its connected phones. 10,000 open apps still means only a few Redis
+  connections.
+- **Decoding progress is live too** (`/api/decode/<id>/stream`). The app shows "Waiting for a free model →
+  Read 6 earlier reports → Writing the story", then the result. Plain JSON endpoints remain as fallbacks.
 
 ## How it handles heavy traffic
 
-- **Decode once, serve everyone.** When 1,000 people open the same story, only one Groq call
-  happens (the job ID is the story ID). Everyone else polls the cached result. Results are cached for 24 h.
-- **Queue + workers.** Requests never wait on Groq directly. Jobs sit in Redis and any number of
-  workers on any number of machines pull from it. To scale: `docker compose up -d --scale worker=6 --scale api=5`.
+- **Decode once, serve everyone.** When 1,000 people open the same story, only one Groq call happens
+  (the job ID is the story ID). Everyone else gets the same live result. Results are cached for 24 h.
+- **Queue + workers.** Requests never wait on Groq directly. To scale:
+  `docker compose up -d --scale worker=6 --scale api=5`.
 - **Multi-model balancer** (`backend/app/balancer.py`). Groq's limits are *per model*, so each model is its
-  own lane with its own requests-per-minute budget, counted atomically in Redis and shared by all workers.
+  own lane with a requests-per-minute budget, counted atomically in Redis and shared by all workers.
   The best lane is picked by `weight × spare capacity × health ÷ in-flight`. On a 429 the lane cools down
-  for Groq's `retry-after` and the job moves to the next model instead of failing. Retired models are
-  dropped automatically at startup.
-- **nginx** spreads app traffic over the API replicas (least connections), retries a failed replica,
-  and rate-limits abusive IPs.
+  for Groq's `retry-after` and the job moves to the next model. Retired models are dropped automatically.
+- **nginx** spreads traffic over the API replicas, keeps SSE streams unbuffered, and rate-limits abusive IPs.
 
-Tested here with fake news + fake LLM: 200 simultaneous readers across 20 stories → exactly 20 model
-calls, finished in 1.3 s, spread over all 6 models by weight, with two workers sharing the load.
+Tested here with sample news and a stand-in LLM: 300 readers opening 20 stories at once over SSE →
+exactly 20 model calls, all done in 1.2 s, spread over the 6 models by weight. An ingest published while
+a phone was connected arrived on its stream immediately.
 
 ## 1. Run the backend (server)
 
@@ -77,7 +96,7 @@ cd app && npm install && npm run dev      # then set the server to http://localh
 | `GROQ_API_KEYS` | none | One or more keys, comma separated |
 | `GROQ_MODELS` | 6 models | `model:rpm:weight` list, one lane per model per key |
 | `NEWS_REGION` | `IN` | Google News edition |
-| `FEED_TTL_SECONDS` | `900` | How often the top 5 refreshes |
+| `FEED_TTL_SECONDS` | `900` | How often the ingester pulls RSS and publishes to Redis |
 | `PREWARM` | `0` | `1` = decode every top story before anyone opens it (instant, but uses more Groq quota) |
 | `WORKER_CONCURRENCY` | `8` | Jobs per worker process |
 | `CLIENT_RPM` | `60` | Requests per minute allowed per phone/IP |
