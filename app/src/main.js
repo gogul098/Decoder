@@ -313,16 +313,16 @@ function renderStory(d) {
       <header class="masthead">${kicker(s)}<h1>${esc(d.headline || s.title)}</h1></header>
       <div class="inner">
       ${d.hook ? `<p class="hook">${esc(d.hook)}</p>` : ""}
-      <div class="core"><span class="tag">THE CORE IDEA</span><p>${esc(d.core_idea)}</p></div>
-      ${qa.length ? `<dl class="qa">${qa.map(([q, v], i) => `<div><dt><span class="tag" style="${col(i + 1)}">${q.toUpperCase()}</span></dt><dd>${esc(v)}</dd></div>`).join("")}</dl>` : ""}
-      ${d.who_affected?.length ? `${sec("WHO IT AFFECTS")}<div class="who">${d.who_affected.map((w, i) =>
+      <div class="core"><span class="tag">The core idea</span><p>${esc(d.core_idea)}</p></div>
+      ${qa.length ? `<dl class="qa">${qa.map(([q, v], i) => `<div><dt><span class="tag" style="${col(i + 1)}">${q}</span></dt><dd>${esc(v)}</dd></div>`).join("")}</dl>` : ""}
+      ${d.who_affected?.length ? `${sec("Who it affects")}<div class="who">${d.who_affected.map((w, i) =>
         `<div style="${col(i + 2)}"><b>${esc(w.group)}</b>${w.impact ? `<span>${esc(w.impact)}</span>` : ""}</div>`).join("")}</div>` : ""}
-      ${d.backstory?.length ? `${sec("HOW WE GOT HERE")}<ol class="timeline">${d.backstory.map((b, i) =>
+      ${d.backstory?.length ? `${sec("How we got here")}<ol class="timeline">${d.backstory.map((b, i) =>
         `<li style="${col(i)}">${b.date ? `<time>${esc(b.date)}</time><br>` : ""}${esc(b.event)}</li>`).join("")}</ol>` : ""}
-      ${d.narrative?.length ? `${sec("THE FULL STORY")}<div class="narrative">${d.narrative.map((p) => `<p>${esc(p)}</p>`).join("")}</div>` : ""}
-      ${d.watch_next ? `${sec("WATCH NEXT")}<p class="watch">${esc(d.watch_next)}</p>` : ""}
+      ${d.narrative?.length ? `${sec("The full story")}<div class="narrative">${d.narrative.map((p) => `<p>${esc(p)}</p>`).join("")}</div>` : ""}
+      ${d.watch_next ? `${sec("What to watch next")}<p class="watch">${esc(d.watch_next)}</p>` : ""}
       ${d.confidence_note ? `<p class="note">${esc(d.confidence_note)}</p>` : ""}
-      ${sec("SOURCES")}
+      ${sec("Sources")}
       <div class="sources">${sources.map((x, i) => `<a href="${esc(x.url)}" data-i="${i}"><b>${esc(x.name)}</b>${x.earlier ? " · earlier" : ""} — ${esc(x.title)}</a>`).join("")}</div>
       <p class="fine">Written by AI (${esc(d.model)}) from the reports listed above. Check them for anything important.</p>
       </div>
@@ -338,8 +338,8 @@ function settingsView() {
   Object.assign(current, { name: "settings" });
   view.innerHTML = `
     <div class="story-top"><a class="back" href="#/">← Back</a></div>
-    <div class="paper box" style="padding:22px">
-      <h1 style="font-size:34px;margin-bottom:4px">Settings</h1>
+    <div class="paper box" style="padding:24px 22px">
+      <h1 style="font-size:32px;margin-bottom:4px">Settings</h1>
       <div class="field"><label for="api">Server address</label>
         <input id="api" type="url" inputmode="url" autocomplete="off" placeholder="https://news.example.com" value="${esc(apiBase())}"></div>
       <button class="btn solid" id="save">Save and connect</button>
