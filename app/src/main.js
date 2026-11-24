@@ -15,9 +15,10 @@ const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
-// Server address, in order: one the user typed in Settings > the address published in the
-// repo's config/app.json (so moving the Render server needs no new APK) > the one built in.
-const apiBase = () => (store.get("api", "") || store.get("api_remote", "") || import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
+// Server address: published in the repo's config/app.json (so moving the Render server needs
+// no new APK), else the one built into the APK. It is never shown in the app.
+store.set("api", "");   // drop addresses typed in older versions
+const apiBase = () => (store.get("api_remote", "") || import.meta.env.VITE_API_BASE || "").replace(/\/+$/, "");
 const BUILD = Number(import.meta.env.VITE_BUILD || 0);
 const VERSION = import.meta.env.VITE_VERSION || "dev";
 const REPO = import.meta.env.VITE_REPO || "gogul098/Decoder";
@@ -201,7 +202,7 @@ async function checkConfig() {
       state.feeds = {};
       connectLive();
       if (current.name === "home") home(current.cat);
-      toast(before ? "Switched to the new server" : "Connected to the server");
+      if (before) toast("Switched to the new server");
     }
   } catch { /* offline or GitHub unreachable: try again next launch */ }
 }
@@ -250,9 +251,13 @@ const current = { name: "", cat: "", id: "" };
 const scrollMemo = {};
 
 function needSetup() {
-  view.innerHTML = `<div class="notice box" style="margin-top:24px"><h2>Connect your server</h2>
-    <p>Decoded needs the address of your backend, the server that collects the news and talks to Groq.</p>
-    <a class="btn solid" href="#/settings">Open settings</a></div>`;
+  view.innerHTML = `<div class="notice box" style="margin-top:24px"><h2>Getting things ready</h2>
+    <p>Decoded is looking for its news server. Check your internet connection; this usually takes a few seconds.</p>
+    <button class="btn solid" id="retry-setup">Try again</button></div>`;
+  view.querySelector("#retry-setup").addEventListener("click", async () => {
+    await checkConfig();
+    if (apiBase()) { connectLive(); route(); }
+  });
 }
 
 function home(cat) {
@@ -433,23 +438,11 @@ function settingsView() {
     <div class="story-top"><a class="back" href="#/">← Back</a></div>
     <div class="paper box" style="padding:24px 22px">
       <h1 style="font-size:32px;margin-bottom:4px">Settings</h1>
-      <div class="field"><label for="api">Server address</label>
-        <input id="api" type="url" inputmode="url" autocomplete="off" placeholder="https://news.example.com" value="${esc(apiBase())}"></div>
-      <div class="upd-actions"><button class="btn solid" id="save">Save and connect</button>
-        ${store.get("api", "") ? `<button class="btn" id="reset">Use default server</button>` : ""}</div>
-      <p id="msg" class="note"></p>
       <h2 class="sec" style="--c:var(--mint)">App version</h2>
       <p style="margin:0 0 12px">Decoded ${esc(VERSION)}${BUILD ? ` · build ${BUILD}` : ""}</p>
       <button class="btn" id="check">Check for updates</button>
       <p id="umsg" class="note"></p>
     </div>`;
-  view.querySelector("#reset")?.addEventListener("click", () => {
-    store.set("api", "");
-    state.feeds = {};
-    connectLive();
-    settingsView();
-    view.querySelector("#msg").textContent = apiBase() ? "Using the default server: " + apiBase() : "No default server is published yet.";
-  });
   view.querySelector("#check").addEventListener("click", async () => {
     const m = view.querySelector("#umsg");
     m.className = "note"; m.textContent = "Checking…";
@@ -459,14 +452,121 @@ function settingsView() {
       m.textContent = r.newer ? `Version ${r.info.version} is available.` : "You're on the latest version.";
     } catch { m.className = "note bad"; m.textContent = "Couldn't check right now. Try again later."; }
   });
-  view.querySelector("#save").addEventListener("click", async () => {
-    const msg = view.querySelector("#msg");
-    const v = view.querySelector("#api").value.trim();
-    if (!v) { msg.className = "note bad"; msg.textContent = "Enter an address first."; return; }
-    store.set("api", v);
-    msg.className = "note"; msg.textContent = "Connecting…";
-    try { await getJSON("/api/categories"); msg.className = "note ok"; msg.textContent = "Connected. News will stream in live."; state.feeds = {}; connectLive(); }
-    catch (e) { msg.className = "note bad"; msg.textContent = "Couldn't connect: " + e.message; }
+}
+
+// ---------------- pull to refresh ----------------
+// Drag the list down from the top: a paper sheet's corner folds over as you pull; let go past
+// the line and the server fetches fresh RSS while a loading screen rotates through taglines.
+const TAGLINES = [
+  "Rounding up today's stories…",
+  "Reading between the headlines…",
+  "Finding out what actually changed…",
+  "Asking why, not just what…",
+  "Folding the news into shape…",
+];
+let refreshing = false;
+
+function setupPull() {
+  const ptr = document.createElement("div");
+  ptr.className = "ptr";
+  ptr.innerHTML = `<div class="ptr-sheet"><i></i></div><span>Pull to refresh</span>`;
+  document.body.appendChild(ptr);
+  const label = ptr.querySelector("span");
+  const LIMIT = 76;
+  let startY = null, pull = 0;
+  const reset = () => { pull = 0; startY = null; ptr.style.setProperty("--p", 0); ptr.classList.remove("ready"); view.style.transform = ""; };
+
+  window.addEventListener("touchstart", (e) => {
+    if (current.name !== "home" || refreshing || window.scrollY > 0 || document.querySelector(".sheet-wrap,.turn-wrap")) return;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+  window.addEventListener("touchmove", (e) => {
+    if (startY === null) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0 || window.scrollY > 0) { reset(); return; }
+    e.preventDefault();
+    pull = Math.min(130, dy * 0.55);
+    ptr.style.setProperty("--p", Math.min(1, pull / LIMIT));
+    view.style.transform = `translateY(${pull}px)`;
+    const ready = pull >= LIMIT;
+    ptr.classList.toggle("ready", ready);
+    label.textContent = ready ? "Release to refresh" : "Pull to refresh";
+  }, { passive: false });
+  window.addEventListener("touchend", () => {
+    if (startY === null) return;
+    const go = pull >= LIMIT;
+    view.style.transition = "transform .3s cubic-bezier(.2,.8,.2,1)";
+    reset();
+    setTimeout(() => { view.style.transition = ""; }, 320);
+    if (go) refreshNow();
+  });
+}
+
+async function refreshNow() {
+  if (refreshing || current.name !== "home") return;
+  refreshing = true;
+  const cat = current.cat;
+  const list = document.getElementById("list");
+  const before = state.feeds[cat]?.updated || 0;
+  const oldIds = new Set((state.feeds[cat]?.stories || []).map((s) => s.id));
+  if (list) {
+    list.innerHTML = `<div class="loading box">
+      <div class="stack"><b></b><b></b><b></b></div>
+      <p class="tagline" id="tagline">${TAGLINES[0]}</p>
+      <p class="note">Fetching the latest in ${esc(catLabel(cat))}</p></div>`;
+  }
+  let t = 0;
+  const rot = setInterval(() => {
+    const el = document.getElementById("tagline");
+    if (!el) return;
+    el.classList.add("swap");
+    setTimeout(() => { el.textContent = TAGLINES[++t % TAGLINES.length]; el.classList.remove("swap"); }, 220);
+  }, 1800);
+  const started = Date.now();
+  try {
+    if (!es || es.readyState === 2) connectLive();
+    await getJSON("/api/refresh");
+    // wait for the ingester: the feed's timestamp moves when it has run (max ~25 s)
+    while (Date.now() - started < 25000) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const d = await getJSON(`/api/feed/${cat}`).catch(() => null);
+      if (d && d.updated > before) { state.feeds[cat] = d; delete state.pending[cat]; break; }
+    }
+  } catch { /* fall through and show what we have */ }
+  await new Promise((r) => setTimeout(r, Math.max(0, 1400 - (Date.now() - started))));   // let the tagline be read
+  clearInterval(rot);
+  refreshing = false;
+  if (current.name === "home" && current.cat === cat) {
+    document.getElementById("fresh") && (document.getElementById("fresh").innerHTML = "");
+    const fresh = (state.feeds[cat]?.stories || []).filter((s) => !oldIds.has(s.id)).map((s) => s.id);
+    renderList(cat, fresh);
+    toast(fresh.length ? `${fresh.length} new ${fresh.length === 1 ? "story" : "stories"}` : "You're up to date");
+  }
+}
+
+// ---------------- intro ----------------
+function splash() {
+  if (reduced) return Promise.resolve();
+  const el = document.createElement("div");
+  el.className = "splash";
+  el.innerHTML = `
+    <div class="splash-card">
+      <div class="splash-sheet"><svg class="splash-corner" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="0,0 0,100 100,100"/></svg>
+        <span class="splash-d">D</span></div>
+      <h1 class="splash-word">Decoded</h1>
+      <p class="splash-tag">Not just what happened.<br><em>Why it happened.</em></p>
+    </div>
+    <div class="splash-dots"><i></i><i></i><i></i></div>`;
+  document.body.appendChild(el);
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return; done = true;
+      el.classList.add("out");
+      setTimeout(() => { el.remove(); resolve(); }, 520);
+    };
+    el.addEventListener("click", finish);           // tap to skip
+    setTimeout(finish, 2400);
   });
 }
 
@@ -490,9 +590,15 @@ function route() {
   else go();
 }
 window.addEventListener("hashchange", route);
+splash();
 route();
-connectLive();
-backgroundChecks();
+setupPull();
+(async () => {
+  if (!apiBase()) await checkConfig();          // first launch: learn the server address
+  connectLive();
+  if (current.name === "home" && apiBase()) home(current.cat);
+  backgroundChecks();
+})();
 
 if (isNative) {
   import("@capacitor/app").then(({ App }) => {

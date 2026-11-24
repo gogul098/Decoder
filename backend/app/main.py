@@ -225,6 +225,15 @@ async def decode_stream(story_id: str, request: Request):
     return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
+@app.get("/api/refresh")
+async def refresh(request: Request):
+    """Pull-to-refresh: ask a worker to fetch RSS now (at most once per 30 s for everyone).
+    The fresh lists arrive on the live stream and in /api/feed/<category>."""
+    slot = int(time.time() // 30)
+    job = await request.app.state.q.enqueue_job("ingest_all", _job_id=f"refresh:{slot}")
+    return {"queued": job is not None, "at": time.time()}
+
+
 @app.get("/api/feed/{category}")
 async def get_feed(category: str, request: Request):
     """Plain JSON fallback (reads Redis only)."""
