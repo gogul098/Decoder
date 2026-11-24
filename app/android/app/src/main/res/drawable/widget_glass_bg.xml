@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Frosted glass: translucent, lighter at the top-left; tinted to the theme's paper colour on Android 12+ -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient android:angle="315" android:startColor="#D9FFFFFF" android:endColor="#A6FFFFFF" />
+    <corners android:radius="24dp" />
+</shape>

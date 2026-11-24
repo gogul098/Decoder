@@ -50,11 +50,10 @@ public class NewsWidgetService extends RemoteViewsService {
                 row.setTextViewText(R.id.row_rank, String.valueOf(it.optInt("rank", position + 1)));
                 row.setTextViewText(R.id.row_topic, it.optString("label") + "  ·  " + ago);
                 row.setTextViewText(R.id.row_title, it.optString("title"));
-                row.setInt(R.id.row_rank_frame, "setBackgroundColor", p.edge);
-                row.setInt(R.id.row_rank, "setBackgroundColor", NewsStore.categoryColor(p, it.optString("category")));
-                row.setTextColor(R.id.row_topic, p.mute);
+                NewsWidget.tint(row, R.id.row_rank_frame, NewsStore.categoryColor(p, it.optString("category")));
+                row.setTextColor(R.id.row_topic, NewsWidget.withAlpha(p.ink, 0xA6));
                 row.setTextColor(R.id.row_title, p.ink);
-                row.setInt(R.id.row_divider, "setBackgroundColor", p.rule);
+                row.setInt(R.id.row_divider, "setBackgroundColor", NewsWidget.withAlpha(p.ink, 0x1F));
                 Intent fill = new Intent();
                 fill.setData(Uri.parse("decoded://s/" + it.optString("id")));
                 row.setOnClickFillInIntent(R.id.row_root, fill);

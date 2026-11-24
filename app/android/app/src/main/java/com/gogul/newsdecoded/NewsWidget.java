@@ -54,7 +54,11 @@ public class NewsWidget extends AppWidgetProvider {
         m.notifyAppWidgetViewDataChanged(ids, R.id.widget_list);
     }
 
-    private static void tint(RemoteViews v, int viewId, int color) {
+    static int withAlpha(int color, int alpha) {
+        return (color & 0x00FFFFFF) | (alpha << 24);
+    }
+
+    static void tint(RemoteViews v, int viewId, int color) {
         if (Build.VERSION.SDK_INT >= 31) {
             v.setColorStateList(viewId, "setBackgroundTintList", ColorStateList.valueOf(color));
         }
@@ -64,15 +68,17 @@ public class NewsWidget extends AppWidgetProvider {
         NewsStore.Palette p = NewsStore.palette(c);
         RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_news);
 
-        // theme: hard shadow in the accent colour, ink outline, paper card
-        tint(v, R.id.widget_shadow, NewsStore.isDark(c) ? p.colors[0] : p.edge);
-        tint(v, R.id.widget_border, p.edge);
-        tint(v, R.id.widget_card, p.paper);
+        // glass: translucent card tinted with the theme's paper colour (keeps the drawable's
+        // transparency), a bright rim, soft shadow; theme colours stay in the tiles and highlight
+        boolean dark = NewsStore.isDark(c);
+        tint(v, R.id.widget_glass, p.paper);
+        tint(v, R.id.widget_border, dark ? 0x4DFFFFFF : 0xB3FFFFFF);
+        tint(v, R.id.widget_sheen, dark ? 0x26FFFFFF : 0x66FFFFFF);
         tint(v, R.id.widget_mark_bar, p.colors[0]);
         v.setTextColor(R.id.widget_title, p.ink);
-        v.setTextColor(R.id.widget_sub, p.mute);
-        v.setTextColor(R.id.widget_empty, p.mute);
-        v.setInt(R.id.widget_rule, "setBackgroundColor", p.edge);
+        v.setTextColor(R.id.widget_sub, withAlpha(p.ink, 0xA6));
+        v.setTextColor(R.id.widget_empty, withAlpha(p.ink, 0xA6));
+        v.setInt(R.id.widget_rule, "setBackgroundColor", withAlpha(p.ink, 0x33));
         v.setInt(R.id.widget_refresh, "setColorFilter", p.ink);
 
         long updated = NewsStore.prefs(c).getLong("updated", 0);
