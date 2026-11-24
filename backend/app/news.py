@@ -43,6 +43,14 @@ CATEGORIES: dict[str, dict] = {
         "label": "World Politics",
         "feeds": [_topic("WORLD"), _search("diplomacy OR summit OR sanctions OR president OR war")],
     },
+    "markets": {
+        "label": "Markets",
+        "feeds": [_topic("BUSINESS"), _search("Sensex OR Nifty OR stock market OR shares OR Wall Street OR RBI rate")],
+    },
+    "oil": {
+        "label": "Oil & Energy",
+        "feeds": [_search("crude oil price OR Brent OR OPEC OR petrol diesel price OR natural gas price")],
+    },
     "security": {
         "label": "Terror & Security",
         "feeds": [_search("terror attack OR terrorism OR militants OR blast OR security forces")],

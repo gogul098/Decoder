@@ -64,5 +64,5 @@ async def snapshot(r: aioredis.Redis, category: str) -> dict:
 
 
 async def set_status(r: aioredis.Redis, story_id: str, stage: str, ttl: int = 600, **extra) -> None:
-    await r.set(f"explain:{story_id}:status", stage, ex=ttl)
+    await r.set(f"explain2:{story_id}:status", stage, ex=ttl)
     await r.publish(decode_channel(story_id), json.dumps({"stage": stage, **extra}))

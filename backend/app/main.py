@@ -178,17 +178,17 @@ async def stream(request: Request):
 async def _ensure_queued(request: Request, story_id: str) -> dict:
     """Return the current decode state, queueing the job if nobody has yet."""
     r = request.app.state.r
-    done = await get_json(r, f"explain:{story_id}")
+    done = await get_json(r, f"explain2:{story_id}")
     if done:
         return {"stage": "ready", "result": done}
     if not await r.exists(f"story:{story_id}"):
         return {"stage": "error", "message": "Story not found. Pull down to refresh."}
-    status = await r.get(f"explain:{story_id}:status")
+    status = await r.get(f"explain2:{story_id}:status")
     if status and status.startswith("error:"):
-        await r.delete(f"explain:{story_id}:status")       # the next open retries
+        await r.delete(f"explain2:{story_id}:status")       # the next open retries
         return {"stage": "error", "message": status[6:]}
     if not status:
-        await r.set(f"explain:{story_id}:status", "queued", ex=600)
+        await r.set(f"explain2:{story_id}:status", "queued", ex=600)
         await request.app.state.q.enqueue_job("decode_story", story_id, _job_id=f"decode:{story_id}")
         status = "queued"
     return {"stage": status, "queue": await r.zcard("arq:queue")}

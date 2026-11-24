@@ -27,13 +27,15 @@ const CATS = [
   { id: "tech", label: "Tech & AI" },
   { id: "india", label: "India" },
   { id: "world", label: "World" },
+  { id: "markets", label: "Markets" },
+  { id: "oil", label: "Oil & Energy" },
   { id: "security", label: "Security" },
 ];
-const CAT_COLOR = { tech: "--blue", india: "--orange", world: "--mint", security: "--red" };
+const CAT_COLOR = { tech: "--blue", india: "--orange", world: "--mint", markets: "--lilac", oil: "--yellow", security: "--red" };
 const RANK_COLOR = ["--yellow", "--pink", "--mint", "--blue", "--lilac"];
 const setCat = (cat) => { document.documentElement.dataset.cat = cat || "tech"; };
 let nextTurn = { color: null, label: "" };   // what the coloured back of the next page flip shows
-const catLabel = (id) => ({ tech: "Tech & AI", india: "Indian politics", world: "World politics", security: "Terror & security" }[id] || id);
+const catLabel = (id) => ({ tech: "Tech & AI", india: "Indian politics", world: "World politics", markets: "Stock markets", oil: "Oil & energy", security: "Terror & security" }[id] || id);
 
 // ---------------- helpers ----------------
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -417,6 +419,14 @@ function renderStory(d) {
         `<div style="${col(i + 2)}"><b>${esc(w.group)}</b>${w.impact ? `<span>${esc(w.impact)}</span>` : ""}</div>`).join("")}</div>` : ""}
       ${d.backstory?.length ? `${sec("How we got here")}<ol class="timeline">${d.backstory.map((b, i) =>
         `<li style="${col(i)}">${b.date ? `<time>${esc(b.date)}</time><br>` : ""}${esc(b.event)}</li>`).join("")}</ol>` : ""}
+      ${d.outcome ? `${sec("Outcome so far")}<p class="outcome">${esc(d.outcome)}</p>` : ""}
+      ${d.future?.length ? `${sec("What could happen next")}<div class="future">${d.future.map((f) => `
+        <div class="scenario lk-${esc(f.likelihood)}"><span class="lk">${esc(f.likelihood[0].toUpperCase() + f.likelihood.slice(1))}</span>
+          <p>${esc(f.scenario)}</p>${f.signal ? `<p class="signal"><b>Sign to watch:</b> ${esc(f.signal)}</p>` : ""}</div>`).join("")}
+        <p class="note">Possibilities, not predictions.</p></div>` : ""}
+      ${d.lessons?.length ? `${sec("What we can learn")}<ol class="lessons">${d.lessons.map((l, i) => `
+        <li style="${col(i + 1)}"><p class="lesson">${esc(l.lesson)}</p>${l.apply ? `<p class="apply"><span class="tag">Apply it</span> ${esc(l.apply)}</p>` : ""}</li>`).join("")}</ol>` : ""}
+      ${["markets", "oil"].includes(s.category) ? `<p class="note">This explains what happened and why. It isn't financial advice.</p>` : ""}
       ${d.narrative?.length ? `${sec("The full story")}<div class="narrative">${d.narrative.map((p) => `<p>${esc(p)}</p>`).join("")}</div>` : ""}
       ${d.watch_next ? `${sec("What to watch next")}<p class="watch">${esc(d.watch_next)}</p>` : ""}
       ${d.confidence_note ? `<p class="note">${esc(d.confidence_note)}</p>` : ""}
@@ -426,7 +436,10 @@ function renderStory(d) {
       </div>
     </article>`;
   const script = [d.headline, d.hook, "The core idea. " + d.core_idea, d.what_changed && "What changed. " + d.what_changed,
-    d.why && "Why. " + d.why, ...(d.narrative || [])].filter(Boolean).join("\n\n");
+    d.why && "Why. " + d.why, d.outcome && "Outcome so far. " + d.outcome,
+    d.future?.length && "What could happen next. " + d.future.map((f) => `${f.likelihood}: ${f.scenario}`).join(". "),
+    d.lessons?.length && "What we can learn. " + d.lessons.map((l) => l.lesson).join(" "),
+    ...(d.narrative || [])].filter(Boolean).join("\n\n");
   const lb = view.querySelector("#listen");
   lb.addEventListener("click", () => speak(script, lb));
   view.querySelectorAll(".sources a").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); openExternal(sources[+a.dataset.i].url); }));

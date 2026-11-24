@@ -298,3 +298,22 @@ body { overscroll-behavior-y: contain; }
 @keyframes tagIn { from { transform: translateY(10px); opacity: 0; } }
 @keyframes dot { to { transform: translateY(-6px); } }
 @keyframes splashOut { to { opacity: 0; transform: scale(1.04); } }
+
+/* ---------- analysis: outcome, scenarios, lessons ---------- */
+.outcome { margin: 0; padding: 12px 14px; font: 17.5px/1.55 var(--serif); border-left: 3px solid var(--edge); background: color-mix(in srgb, var(--mint) 18%, var(--paper)); border-radius: 0 8px 8px 0; }
+.future { display: grid; gap: 10px; }
+.scenario { padding: 12px 14px; border: var(--bw) solid var(--edge); border-radius: 10px; background: var(--paper); box-shadow: 2px 2px 0 var(--hard); }
+.scenario p { margin: 0; font: 17px/1.5 var(--serif); }
+.scenario .signal { margin-top: 6px; font: 14px/1.45 var(--sans); color: var(--ink2); }
+.scenario .signal b { font-weight: 600; color: var(--ink); }
+.lk { display: inline-block; margin-bottom: 6px; font: 700 11px/1.6 var(--sans); color: #161614; border: 1px solid #161614; border-radius: 4px; padding: 0 6px; }
+.lk-likely .lk { background: var(--mint); }
+.lk-possible .lk { background: var(--yellow); }
+.lk-unlikely .lk { background: color-mix(in srgb, var(--rule) 60%, #fff); }
+.lessons { list-style: none; margin: 0; padding: 0; counter-reset: l; }
+.lessons li { position: relative; padding: 12px 0 14px 40px; border-bottom: 1px solid var(--rule); counter-increment: l; }
+.lessons li::before { content: counter(l); position: absolute; left: 0; top: 12px; width: 26px; height: 26px; display: grid; place-items: center;
+  font: 700 13px var(--sans); color: #161614; background: var(--c); border: 1px solid var(--edge); border-radius: 6px; }
+.lesson { margin: 0 0 6px; font: 500 17.5px/1.45 var(--serif); }
+.apply { margin: 0; font: 15px/1.5 var(--sans); color: var(--ink2); }
+.apply .tag { margin: 0 6px 0 0; background: var(--mint); vertical-align: 1px; }

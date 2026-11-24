@@ -36,7 +36,7 @@ async def shutdown(ctx):
 
 async def decode_story(ctx, story_id: str) -> str:
     r = ctx["r"]
-    done = await r.get(f"explain:{story_id}")
+    done = await r.get(f"explain2:{story_id}")
     if done:
         await r.publish(decode_channel(story_id), json.dumps({"stage": "ready", "result": json.loads(done)}))
         return "cached"
@@ -56,8 +56,8 @@ async def decode_story(ctx, story_id: str) -> str:
         return "error"
     result.update({"id": story_id, "model": model, "story": story,
                    "leads": [{k: l[k] for k in ("title", "source", "url", "published")} for l in leads]})
-    await r.set(f"explain:{story_id}", json.dumps(result), ex=settings.explain_ttl)
-    await r.delete(f"explain:{story_id}:status")
+    await r.set(f"explain2:{story_id}", json.dumps(result), ex=settings.explain_ttl)
+    await r.delete(f"explain2:{story_id}:status")
     await r.publish(decode_channel(story_id), json.dumps({"stage": "ready", "result": result}))
     return "ok"
 

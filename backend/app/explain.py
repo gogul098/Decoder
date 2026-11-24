@@ -18,6 +18,13 @@ Rules:
 - For violence or terrorism, be factual and calm, no graphic detail, no speculation about suspects.
 - Write like a great magazine writer: open with a concrete hook, short sentences, no jargon
   (explain any term you must use in a few words).
+- Analysis: separate what HAS happened (outcome so far, only from the headlines) from what MIGHT
+  happen (scenarios). Scenarios are possibilities, never predictions stated as fact; give each a
+  rough likelihood (likely / possible / unlikely) and a signal that would show it is happening.
+- Lessons: general, reusable insights a reader can apply when they see similar news again
+  (how to read such events, what tends to follow, what to check). For markets, oil or any money
+  topic: explain cause and effect, but NEVER tell anyone to buy, sell or hold anything, and no
+  price targets.
 
 Return ONE JSON object with exactly these keys:
 {
@@ -31,6 +38,9 @@ Return ONE JSON object with exactly these keys:
  "who_affected": [{"group": "who", "impact": "how they are affected"}],
  "backstory": [{"date": "e.g. 12 Nov", "event": "what happened then"}],
  "narrative": ["3-5 short paragraphs telling the whole story in flowing prose"],
+ "outcome": "what has actually resulted so far, 1-3 sentences; say clearly if it is too early to tell",
+ "future": [{"scenario": "what could happen next", "likelihood": "likely | possible | unlikely", "signal": "what would show it is happening"}],
+ "lessons": [{"lesson": "a reusable insight from this story", "apply": "how to use it next time you see similar news"}],
  "watch_next": "one thing to watch for next",
  "confidence_note": "mention anything unclear or disputed, or empty string"
 }"""
@@ -46,6 +56,23 @@ class Beat(BaseModel):
     event: str
 
 
+class Scenario(BaseModel):
+    scenario: str
+    likelihood: str = "possible"
+    signal: str = ""
+
+    @field_validator("likelihood", mode="before")
+    @classmethod
+    def _lk(cls, v):
+        v = str(v or "possible").lower()
+        return next((k for k in ("unlikely", "likely", "possible") if k in v), "possible")
+
+
+class Lesson(BaseModel):
+    lesson: str
+    apply: str = ""
+
+
 class Decoded(BaseModel):
     headline: str
     hook: str = ""
@@ -57,6 +84,9 @@ class Decoded(BaseModel):
     who_affected: list[Affected] = Field(default_factory=list)
     backstory: list[Beat] = Field(default_factory=list)
     narrative: list[str] = Field(default_factory=list)
+    outcome: str = ""
+    future: list[Scenario] = Field(default_factory=list)
+    lessons: list[Lesson] = Field(default_factory=list)
     watch_next: str = ""
     confidence_note: str = ""
 
@@ -71,6 +101,16 @@ class Decoded(BaseModel):
     @classmethod
     def _aff(cls, v):
         return [{"group": x} if isinstance(x, str) else x for x in (v or [])]
+
+    @field_validator("future", mode="before")
+    @classmethod
+    def _fut(cls, v):
+        return [{"scenario": x} if isinstance(x, str) else x for x in (v or [])]
+
+    @field_validator("lessons", mode="before")
+    @classmethod
+    def _les(cls, v):
+        return [{"lesson": x} if isinstance(x, str) else x for x in (v or [])]
 
     @field_validator("backstory", mode="before")
     @classmethod

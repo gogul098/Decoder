@@ -182,7 +182,7 @@ class Balancer:
             await asyncio.sleep(0.2)
             return parse_json(mock_llm_answer(lane.spec.model))
         body = {"model": lane.spec.model, "messages": messages, "temperature": 0.6,
-                "max_tokens": 2200, "response_format": {"type": "json_object"}}
+                "max_tokens": 3200, "response_format": {"type": "json_object"}}
         for _ in range(2):
             try:
                 r = await self.http.post(f"{settings.groq_base}/chat/completions", json=body,
