@@ -107,6 +107,23 @@ def _ts(entry) -> float:
     return time.time()
 
 
+def _image(e) -> str:
+    """Thumbnail the publisher put in the feed (media:thumbnail / media:content / enclosure / <img>)."""
+    for key in ("media_thumbnail", "media_content"):
+        for m in e.get(key) or []:
+            url = m.get("url", "")
+            if url and (key == "media_thumbnail" or m.get("medium") == "image" or "image" in m.get("type", "")
+                        or re.search(r"\.(jpe?g|png|webp)(\?|$)", url, re.I)):
+                return url
+    for l in e.get("links") or []:
+        if l.get("rel") == "enclosure" and "image" in l.get("type", ""):
+            return l.get("href", "")
+    m = re.search(r'<img[^>]+src="([^"]+)"', e.get("summary", "") or "")
+    if m and not m.group(1).startswith("data:") and "pixel" not in m.group(1):
+        return html.unescape(m.group(1))
+    return ""
+
+
 def parse_feed(xml: str) -> list[dict]:
     items = []
     for e in feedparser.parse(xml).entries:
@@ -119,6 +136,7 @@ def parse_feed(xml: str) -> list[dict]:
             "url": e.get("link", ""),
             "published": _ts(e),
             "summary": _clean(e.get("summary", ""))[:400],
+            "image": _image(e),
         })
     return items
 
@@ -194,8 +212,17 @@ def rank(groups: list[list[dict]], now: float | None = None, top: int = 5) -> li
             "outlets": len(seen),
             "sources": sources[:8],
             "score": round(score, 2),
+            **_pick_image(lead, members),
         })
     return out
+
+
+def _pick_image(lead: dict, members: list[dict]) -> dict:
+    """Prefer the lead headline's photo, else any outlet's; keep who it came from for the credit."""
+    for m in [lead] + members:
+        if m.get("image", "").startswith(("http://", "https://")) or (settings.news_mock and m.get("image", "").startswith("data:")):
+            return {"image": m["image"].replace("http://", "https://", 1), "image_credit": m["source"]}
+    return {"image": "", "image_credit": ""}
 
 
 async def top_stories(category: str, top: int = 5, report: list | None = None) -> list[dict]:

@@ -51,6 +51,17 @@ _SAMPLE = {
 }
 
 
+def _svg(i: int) -> str:
+    import base64
+    pal = ["#5b8cff", "#ff8a3d", "#5ce1b6", "#ff7ab6", "#b9a3ff", "#ffd23f"]
+    a, b = pal[i % 6], pal[(i + 2) % 6]
+    svg = (f"<svg xmlns='http://www.w3.org/2000/svg' width='160' height='120'><defs><linearGradient id='g' x2='1' y2='1'>"
+           f"<stop offset='0' stop-color='{a}'/><stop offset='1' stop-color='{b}'/></linearGradient></defs>"
+           f"<rect width='160' height='120' fill='url(#g)'/><circle cx='118' cy='38' r='18' fill='#fff' opacity='.7'/>"
+           f"<path d='M0 120 L50 64 L84 96 L112 70 L160 120Z' fill='#161614' opacity='.35'/></svg>")
+    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+
+
 def mock_items(category: str) -> list[dict]:
     now = time.time()
     items = []
@@ -61,6 +72,7 @@ def mock_items(category: str) -> list[dict]:
                 "source": o, "url": f"https://example.com/{category}/{i}/{j}",
                 "published": now - (i * 2 + j) * H,
                 "summary": f"Sample summary for testing: {title}. Further details reported by {o}.",
+                "image": "" if i == 2 else _svg(i),
             })
     return items
 

@@ -35,6 +35,39 @@ const CAT_COLOR = { tech: "--blue", india: "--orange", world: "--mint", markets:
 const RANK_COLOR = ["--yellow", "--pink", "--mint", "--blue", "--lilac"];
 const setCat = (cat) => { document.documentElement.dataset.cat = cat || "tech"; };
 let nextTurn = { color: null, label: "" };   // what the coloured back of the next page flip shows
+// ---------------- appearance ----------------
+const THEMES = [
+  { id: "classic", name: "Classic", desk: "#f6f4ef", paper: "#fffefb", dots: ["#ffd23f", "#ff7ab6", "#5ce1b6", "#6b95ff"] },
+  { id: "newsprint", name: "Newsprint", desk: "#ece8de", paper: "#faf7ef", dots: ["#ecd896", "#e7b4aa", "#b5d2bd", "#b0c3dd"] },
+  { id: "ocean", name: "Ocean", desk: "#e9f1f4", paper: "#fafdfe", dots: ["#ffd166", "#2ec4b6", "#4d8dff", "#8ecae6"] },
+  { id: "sunset", name: "Sunset", desk: "#fbefe7", paper: "#fffaf6", dots: ["#ffc857", "#ff6b9a", "#f9844a", "#e63946"] },
+  { id: "forest", name: "Forest", desk: "#edf1e8", paper: "#fbfdf8", dots: ["#e9c46a", "#8ac926", "#2a9d8f", "#e76f51"] },
+  { id: "grape", name: "Grape", desk: "#f2eff8", paper: "#fdfbff", dots: ["#ffd6a5", "#ff8fc6", "#a0c4ff", "#bdb2ff"] },
+];
+const darkMQ = matchMedia("(prefers-color-scheme: dark)");
+function applyAppearance() {
+  const root = document.documentElement;
+  const mode = store.get("mode", "system");
+  root.dataset.mode = mode === "system" ? (darkMQ.matches ? "dark" : "light") : mode;
+  root.dataset.theme = store.get("theme", "classic");
+  const desk = getComputedStyle(root).getPropertyValue("--desk").trim();
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", desk));
+}
+darkMQ.addEventListener?.("change", applyAppearance);
+applyAppearance();
+
+const tilt = (id) => ((parseInt(id.slice(0, 4), 16) % 9) - 4) || 3;       // each clipping sits a bit crooked
+const clip = (s, big = false) => s.image ? `
+  <figure class="clip${big ? " big" : ""}" style="--tilt:${tilt(s.id)}deg"><i class="pin"></i>
+    <img src="${esc(s.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" decoding="async">
+    ${big && s.image_credit ? `<figcaption>Photo: ${esc(s.image_credit)}</figcaption>` : ""}</figure>` : "";
+function hideBrokenClips(root) {
+  root.querySelectorAll(".clip img").forEach((img) => img.addEventListener("error", () => {
+    img.closest(".leaf")?.classList.remove("has-clip");
+    img.closest(".clip")?.remove();
+  }));
+}
+
 const catLabel = (id) => ({ tech: "Tech & AI", india: "Indian politics", world: "World politics", markets: "Stock markets", oil: "Oil & energy", security: "Terror & security" }[id] || id);
 
 // ---------------- helpers ----------------
@@ -302,14 +335,15 @@ function renderList(cat, highlight = []) {
   list.innerHTML = feed.stories.map((s, i) => `
     <a class="sheet${highlight.includes(s.id) ? " new" : ""}" href="#/s/${s.id}" data-rank="${i + 1}"
        style="--c:var(${RANK_COLOR[i % 5]});animation-delay:${i * 60}ms">
-      <div class="frame"><div class="leaf">
+      <div class="frame"><div class="leaf${s.image ? " has-clip" : ""}">
         <div class="num">${i + 1}</div>
         <div><h2>${esc(s.title)}</h2>
           <div class="meta"><span>${s.outlets} ${s.outlets > 1 ? "outlets" : "outlet"}</span><span>${ago(s.published)}</span><span>${esc(s.sources[0]?.name || "")}</span></div>
-        </div>
+        </div>${clip(s)}
       </div></div>
       <svg class="corner" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon points="0,0 0,100 100,100"/></svg>
     </a>`).join("");
+  hideBrokenClips(list);
   list.querySelectorAll(".sheet").forEach((a) => a.addEventListener("click", (e) => {
     e.preventDefault();
     a.classList.add("curl");                       // the corner lifts first, then the page turns
@@ -367,7 +401,7 @@ function story(id) {
   view.innerHTML = `
     <div class="story-top"><a class="back" href="#/c/${store.get("cat", "tech")}">← Top five</a></div>
     <article class="paper box">
-      <header class="masthead">${known ? `${kicker(known)}<h1>${esc(known.title)}</h1>` : `<h1>Decoding…</h1>`}</header>
+      <header class="masthead">${known ? `${kicker(known)}${clip(known, true)}<h1>${esc(known.title)}</h1>` : `<h1>Decoding…</h1>`}</header>
       <div class="inner">
       <ol class="steps">
         <li data-s="queued"><i></i>Waiting for a free model</li>
@@ -444,7 +478,7 @@ function renderStory(d) {
     <div class="story-top"><a class="back" href="#/c/${store.get("cat", "tech")}">← Top five</a>
       <button class="btn" id="listen">${icon.play}Listen</button></div>
     <article class="paper box">
-      <header class="masthead">${kicker(s)}<h1>${esc(d.headline || s.title)}</h1></header>
+      <header class="masthead" style="--c:var(${CAT_COLOR[s.category] || "--yellow"})">${kicker(s)}${clip(s, true)}<h1>${esc(d.headline || s.title)}</h1></header>
       <div class="inner">
       ${d.hook ? `<p class="hook">${esc(d.hook)}</p>` : ""}
       <div class="core"><span class="tag">The core idea</span><p>${esc(d.core_idea)}</p></div>
@@ -474,6 +508,7 @@ function renderStory(d) {
     d.future?.length && "What could happen next. " + d.future.map((f) => `${f.likelihood}: ${f.scenario}`).join(". "),
     d.lessons?.length && "What we can learn. " + d.lessons.map((l) => l.lesson).join(" "),
     ...(d.narrative || [])].filter(Boolean).join("\n\n");
+  hideBrokenClips(view);
   const lb = view.querySelector("#listen");
   lb.addEventListener("click", () => speak(script, lb));
   view.querySelectorAll(".sources a").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); openExternal(sources[+a.dataset.i].url); }));
@@ -485,11 +520,26 @@ function settingsView() {
     <div class="story-top"><a class="back" href="#/">← Back</a></div>
     <div class="paper box" style="padding:24px 22px">
       <h1 style="font-size:32px;margin-bottom:4px">Settings</h1>
+      <h2 class="sec" style="--c:var(--yellow)">Appearance</h2>
+      <div class="seg" role="group" aria-label="Light or dark">${[["system", "System"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) =>
+        `<button data-mode="${v}" aria-pressed="${store.get("mode", "system") === v}">${l}</button>`).join("")}</div>
+      <div class="themes">${THEMES.map((t) => `
+        <button class="swatch" data-theme="${t.id}" aria-pressed="${store.get("theme", "classic") === t.id}" style="--sw-desk:${t.desk};--sw-paper:${t.paper}">
+          <span class="mini"><span class="dots">${t.dots.map((c) => `<i style="background:${c}"></i>`).join("")}</span><span class="lines"></span></span>
+          <b>${t.name}</b></button>`).join("")}</div>
       <h2 class="sec" style="--c:var(--mint)">App version</h2>
       <p style="margin:0 0 12px">Decoded ${esc(VERSION)}${BUILD ? ` · build ${BUILD}` : ""}</p>
       <button class="btn" id="check">Check for updates</button>
       <p id="umsg" class="note"></p>
     </div>`;
+  view.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
+    store.set("mode", b.dataset.mode); applyAppearance();
+    view.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+  }));
+  view.querySelectorAll(".swatch").forEach((b) => b.addEventListener("click", () => {
+    store.set("theme", b.dataset.theme); applyAppearance();
+    view.querySelectorAll(".swatch").forEach((x) => x.setAttribute("aria-pressed", x === b));
+  }));
   view.querySelector("#check").addEventListener("click", async () => {
     const m = view.querySelector("#umsg");
     m.className = "note"; m.textContent = "Checking…";

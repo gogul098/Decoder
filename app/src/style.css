@@ -30,11 +30,22 @@
 :root[data-cat="india"] { --cat: var(--orange); }
 :root[data-cat="world"] { --cat: var(--mint); }
 :root[data-cat="security"] { --cat: var(--red); }
-@media (prefers-color-scheme: dark) {
-  :root { --desk: #141414; --paper: #1d1d1c; --ink: #efede7; --ink2: #c9c6bd; --mute: #8f8c83; --rule: #2d2c29;
-    --edge: #efede7; --live: #3ddc84; color-scheme: dark; }
-  * { --hard: var(--c, var(--cat)); }   /* at night the small hard shadows take each item's colour */
-}
+/* Light / dark is chosen in Settings (System follows the phone); the app sets data-mode. */
+:root[data-mode="dark"] { --desk: #141414; --paper: #1d1d1c; --ink: #efede7; --ink2: #c9c6bd; --mute: #8f8c83; --rule: #2d2c29;
+  --edge: #efede7; --live: #3ddc84; color-scheme: dark; }
+:root[data-mode="dark"] * { --hard: var(--c, var(--cat)); }   /* at night the small hard shadows take each item's colour */
+
+/* ---------- colour themes: paper tone + the candy palette used for ranks, tags and categories ---------- */
+:root[data-theme="newsprint"] { --desk: #ece8de; --paper: #faf7ef; --yellow: #ecd896; --pink: #e7b4aa; --mint: #b5d2bd; --blue: #b0c3dd; --lilac: #cabfdd; --orange: #e9be93; --red: #d98a7e; }
+:root[data-theme="newsprint"][data-mode="dark"] { --desk: #1a1915; --paper: #25231e; }
+:root[data-theme="ocean"] { --desk: #e9f1f4; --paper: #fafdfe; --yellow: #ffd166; --pink: #90e0ef; --mint: #2ec4b6; --blue: #4d8dff; --lilac: #8ecae6; --orange: #ffb703; --red: #fb6f92; }
+:root[data-theme="ocean"][data-mode="dark"] { --desk: #0d181d; --paper: #142229; }
+:root[data-theme="sunset"] { --desk: #fbefe7; --paper: #fffaf6; --yellow: #ffc857; --pink: #ff6b9a; --mint: #ffa69e; --blue: #ff8c61; --lilac: #c38d9e; --orange: #f9844a; --red: #e63946; }
+:root[data-theme="sunset"][data-mode="dark"] { --desk: #1d1311; --paper: #2a1b18; }
+:root[data-theme="forest"] { --desk: #edf1e8; --paper: #fbfdf8; --yellow: #e9c46a; --pink: #f4a261; --mint: #8ac926; --blue: #2a9d8f; --lilac: #a7c957; --orange: #e76f51; --red: #d1495b; }
+:root[data-theme="forest"][data-mode="dark"] { --desk: #111812; --paper: #19221a; }
+:root[data-theme="grape"] { --desk: #f2eff8; --paper: #fdfbff; --yellow: #ffd6a5; --pink: #ff8fc6; --mint: #9bf6ff; --blue: #a0c4ff; --lilac: #bdb2ff; --orange: #ffadad; --red: #ff6b8b; }
+:root[data-theme="grape"][data-mode="dark"] { --desk: #16121e; --paper: #211b2b; }
 
 * { box-sizing: border-box; min-width: 0; -webkit-tap-highlight-color: transparent; }
 html { background: var(--desk); }
@@ -332,3 +343,34 @@ body { overscroll-behavior-y: contain; }
 .archived .t { font: 17px/1.35 var(--serif); color: var(--ink2); }
 .archived .m { font-size: 12.5px; color: var(--mute); }
 .archived:active .t { color: var(--ink); }
+
+/* ---------- newspaper clippings: small photos pinned to a sticky note ---------- */
+.leaf.has-clip { grid-template-columns: 34px minmax(0, 1fr) 82px; padding-right: 16px; }
+.clip { position: relative; margin: 14px 0 0; width: 82px; height: 76px; padding: 7px 7px 9px; transform: rotate(var(--tilt, 3deg));
+  background: color-mix(in srgb, var(--c, var(--yellow)) 55%, var(--paper)); border: 1px solid color-mix(in srgb, var(--edge) 35%, transparent);
+  box-shadow: 2px 3px 0 color-mix(in srgb, var(--edge) 22%, transparent); border-radius: 2px 2px 8px 2px; align-self: start; }
+.clip img { display: block; width: 100%; height: 100%; object-fit: cover; border: 3px solid #fff; outline: 1px solid rgba(0, 0, 0, .15);
+  filter: saturate(.85) contrast(1.05); background: var(--rule); }
+.pin { position: absolute; left: 50%; top: -5px; width: 12px; height: 12px; translate: -50% 0; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ff9a9a, #e0332f 55%, #9e1c1a); border: 1px solid #161614;
+  box-shadow: 1px 2px 0 rgba(0, 0, 0, .35); z-index: 1; }
+.clip.big { float: right; width: 128px; height: 118px; margin: 0 0 10px 14px; padding: 9px 9px 18px; }
+.clip.big figcaption { position: absolute; left: 0; right: 0; bottom: 2px; font: 600 9.5px var(--sans); color: #161614; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; }
+.clip.big img { height: calc(100% - 4px); }
+.masthead::after { content: ""; display: block; clear: both; }
+@media (max-width: 360px) { .leaf.has-clip { grid-template-columns: 30px minmax(0, 1fr) 68px; } .clip { width: 68px; height: 64px; } }
+
+/* ---------- appearance settings ---------- */
+.seg { display: inline-flex; border: var(--bw) solid var(--edge); border-radius: 10px; overflow: hidden; box-shadow: 2px 2px 0 var(--hard); }
+.seg button { min-height: 42px; padding: 0 16px; border: 0; background: var(--paper); font: 600 14px var(--sans); color: var(--ink2); }
+.seg button + button { border-left: var(--bw) solid var(--edge); }
+.seg button[aria-pressed="true"] { background: var(--yellow); color: #161614; }
+.themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.swatch { padding: 8px; border: var(--bw) solid var(--rule); border-radius: 12px; background: var(--sw-desk); text-align: left; }
+.swatch[aria-pressed="true"] { border-color: var(--edge); box-shadow: 2px 2px 0 var(--hard); }
+.swatch .mini { display: block; height: 44px; border-radius: 6px; background: var(--sw-paper); border: 1px solid rgba(0, 0, 0, .25); padding: 6px; }
+.swatch .dots { display: flex; gap: 4px; }
+.swatch .dots i { width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0, 0, 0, .55); }
+.swatch .lines { display: block; height: 4px; width: 70%; margin-top: 7px; border-radius: 2px; background: rgba(0, 0, 0, .18); }
+.swatch b { display: block; margin-top: 7px; font: 600 13px var(--sans); color: #161614; }
