@@ -33,7 +33,11 @@ public class MainActivity extends BridgeActivity {
             try {
                 StringWriter sw = new StringWriter();
                 e.printStackTrace(new PrintWriter(sw));
-                String report = "Decoded " + BuildConfig.VERSION_NAME + " · Android " + Build.VERSION.RELEASE
+                String version = "?";
+                try {
+                    version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+                } catch (Throwable ignored) {}
+                String report = "Decoded " + version + " · Android " + Build.VERSION.RELEASE
                         + " (API " + Build.VERSION.SDK_INT + ") · " + Build.MANUFACTURER + " " + Build.MODEL
                         + "\nThread: " + t.getName() + "\n\n" + sw;
                 NewsStore.prefs(getApplicationContext()).edit()

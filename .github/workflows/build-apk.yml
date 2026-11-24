@@ -42,12 +42,22 @@ jobs:
         if: env.HAS_KEYSTORE == 'true'
         env: { KEYSTORE_B64: "${{ secrets.KEYSTORE_B64 }}" }
         run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore" && echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
-      - run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon -PversionCode=$BUILD -PversionName=$VERSION
+      - run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon -PversionCode=$BUILD -PversionName=$VERSION 2>&1 | tee ../gradle.log
         working-directory: app/android
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      # If the build fails, publish the Gradle log where it can be read without signing in
+      - name: Publish build log on failure
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ci-log
+          name: CI build log (last failure)
+          prerelease: true
+          make_latest: false
+          files: app/gradle.log
       - run: cp android/app/build/outputs/apk/debug/app-debug.apk news-decoded.apk
       - name: Write update manifest
         env:
