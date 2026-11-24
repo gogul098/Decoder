@@ -20,8 +20,12 @@ public class NewsWidget extends AppWidgetProvider {
 
     @Override
     public void onUpdate(Context c, AppWidgetManager m, int[] ids) {
-        for (int id : ids) m.updateAppWidget(id, build(c, id));
-        m.notifyAppWidgetViewDataChanged(ids, R.id.widget_list);
+        try {
+            for (int id : ids) m.updateAppWidget(id, build(c, id));
+            m.notifyAppWidgetViewDataChanged(ids, R.id.widget_list);
+        } catch (Throwable t) {
+            android.util.Log.w("Decoded", "widget update failed", t);
+        }
         NewsSync.schedule(c);
         if (NewsStore.prefs(c).getString("items", "").isEmpty()) NewsSync.refreshNow(c);
     }

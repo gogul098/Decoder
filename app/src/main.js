@@ -548,6 +548,7 @@ function settingsView() {
       <label class="switch-row"><span><b>New-story alerts</b><br><span class="note" style="margin:0">A ring every 3–4 hours when fresh stories arrive. The home-screen widget updates at the same time.</span></span>
         <input type="checkbox" id="alerts" ${store.get("alerts", "on") === "on" ? "checked" : ""}><i class="switch"></i></label>
       <p class="note">Add the widget: long-press your home screen → Widgets → Decoded.</p>
+      <div id="crash"></div>
       <h2 class="sec" style="--c:var(--mint)">App version</h2>
       <p style="margin:0 0 12px">Decoded ${esc(VERSION)}${BUILD ? ` · build ${BUILD}` : ""}</p>
       <button class="btn" id="check">Check for updates</button>
@@ -557,6 +558,18 @@ function settingsView() {
     store.set("mode", b.dataset.mode); applyAppearance();
     view.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", x === b));
   }));
+  if (isNative) Native.lastCrash().then(({ report }) => {
+    if (!report) return;
+    const box = view.querySelector("#crash");
+    box.innerHTML = `<h2 class="sec" style="--c:var(--red)">Last crash report</h2>
+      <p class="note" style="margin:0 0 8px">The app closed unexpectedly last time. Copy this and send it to the developer.</p>
+      <pre class="crash">${esc(report)}</pre>
+      <div class="upd-actions"><button class="btn" id="crash-copy">Copy report</button><button class="btn" id="crash-clear">Clear</button></div>`;
+    box.querySelector("#crash-copy").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(report); toast("Report copied"); } catch { toast("Couldn't copy; long-press the text instead"); }
+    });
+    box.querySelector("#crash-clear").addEventListener("click", () => { Native.clearCrash(); box.innerHTML = ""; });
+  }).catch(() => {});
   view.querySelector("#alerts").addEventListener("change", (e) => {
     store.set("alerts", e.target.checked ? "on" : "off");
     if (e.target.checked && isNative) Native.requestNotifications().catch(() => {});
@@ -785,6 +798,7 @@ setupSwipe();
   if (current.name === "home" && apiBase()) home(current.cat);
   backgroundChecks();
   syncNative();
+  if (isNative) Native.lastCrash().then(({ report }) => { if (report) setTimeout(() => toast("The app crashed last time · see Settings"), 3500); }).catch(() => {});
   if (isNative && !store.get("asked_notify", "")) {   // alerts are on by default: ask once, after the intro
     store.set("asked_notify", "1");
     setTimeout(() => Native.requestNotifications().catch(() => {}), 3000);

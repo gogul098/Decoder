@@ -33,6 +33,14 @@ final class NewsSync {
 
     /** Schedule the background check: once in every 3-hour period, in its last hour (so every 3–4 h). */
     static void schedule(Context c) {
+        try {
+            scheduleUnsafe(c);
+        } catch (Exception e) {
+            android.util.Log.w("Decoded", "could not schedule news alerts", e);
+        }
+    }
+
+    private static void scheduleUnsafe(Context c) {
         JobScheduler js = (JobScheduler) c.getSystemService(Context.JOB_SCHEDULER_SERVICE);
         if (js == null) return;
         if (Build.VERSION.SDK_INT >= 24 && js.getPendingJob(JOB_PERIODIC) != null) return;
@@ -45,11 +53,16 @@ final class NewsSync {
     }
 
     static void refreshNow(Context c) {
-        JobScheduler js = (JobScheduler) c.getSystemService(Context.JOB_SCHEDULER_SERVICE);
-        if (js == null) return;
-        js.schedule(new JobInfo.Builder(JOB_NOW, new ComponentName(c, NewsJobService.class))
-                .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-                .build());
+        try {
+            JobScheduler js = (JobScheduler) c.getSystemService(Context.JOB_SCHEDULER_SERVICE);
+            if (js == null) return;
+            js.schedule(new JobInfo.Builder(JOB_NOW, new ComponentName(c, NewsJobService.class))
+                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                    .build());
+        } catch (Exception e) {
+            // fall back to a plain background thread
+            new Thread(() -> run(c.getApplicationContext(), false)).start();
+        }
     }
 
     /** Runs on a background thread. */
@@ -64,11 +77,11 @@ final class NewsSync {
             prefs.edit().putString("items", items.toString()).putLong("updated", System.currentTimeMillis()).apply();
             if (alert && prefs.getBoolean("alerts", true)) notifyNew(c, items);
             else markSeen(prefs, items);
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
             // offline or server down: keep the last stories, try again next time
         } finally {
             prefs.edit().putBoolean("refreshing", false).apply();
-            NewsWidget.updateAll(c);
+            try { NewsWidget.updateAll(c); } catch (Throwable ignored) {}
         }
     }
 

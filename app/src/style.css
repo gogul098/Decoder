@@ -385,3 +385,5 @@ body { overscroll-behavior-y: contain; }
 .switch-row input:checked + .switch { background: var(--mint); }
 .switch-row input:checked + .switch::after { transform: translateX(22px); }
 .switch-row input:focus-visible + .switch { outline: 2px solid var(--ink); outline-offset: 2px; }
+.crash { max-height: 220px; overflow: auto; font: 11.5px/1.45 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word;
+  padding: 10px; border: 1px solid var(--rule); border-radius: 8px; background: var(--desk); color: var(--ink2); user-select: text; }

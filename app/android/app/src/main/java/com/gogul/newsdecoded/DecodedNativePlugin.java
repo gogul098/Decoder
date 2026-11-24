@@ -4,6 +4,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 
+import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -24,23 +25,46 @@ public class DecodedNativePlugin extends Plugin {
         Boolean alerts = call.getBoolean("alerts", true);
         e.putBoolean("alerts", alerts == null || alerts);
         e.apply();
-        NewsSync.schedule(getContext());
-        NewsWidget.updateAll(getContext());
+        try {
+            NewsSync.schedule(getContext());
+            NewsWidget.updateAll(getContext());
+        } catch (Throwable t) {
+            android.util.Log.w("Decoded", "widget/alerts sync failed", t);
+        }
         call.resolve();
     }
 
     @PluginMethod
     public void requestNotifications(PluginCall call) {
-        if (Build.VERSION.SDK_INT >= 33 && getActivity() != null
-                && getContext().checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
-            getActivity().requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 4711);
-        }
+        try {
+            if (Build.VERSION.SDK_INT >= 33 && getActivity() != null
+                    && getContext().checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                getActivity().runOnUiThread(() -> {
+                    try {
+                        getActivity().requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 4711);
+                    } catch (Throwable ignored) {}
+                });
+            }
+        } catch (Throwable ignored) {}
         call.resolve();
     }
 
     @PluginMethod
     public void refreshWidget(PluginCall call) {
         NewsSync.refreshNow(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void lastCrash(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("report", NewsStore.prefs(getContext()).getString("last_crash", ""));
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void clearCrash(PluginCall call) {
+        NewsStore.prefs(getContext()).edit().remove("last_crash").apply();
         call.resolve();
     }
 }
