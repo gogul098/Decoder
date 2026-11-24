@@ -118,9 +118,17 @@ def _image(e) -> str:
     for l in e.get("links") or []:
         if l.get("rel") == "enclosure" and "image" in l.get("type", ""):
             return l.get("href", "")
-    m = re.search(r'<img[^>]+src="([^"]+)"', e.get("summary", "") or "")
-    if m and not m.group(1).startswith("data:") and "pixel" not in m.group(1):
-        return html.unescape(m.group(1))
+    for key in ("storyimage", "fullimage", "image"):          # NDTV and others use custom tags
+        v = e.get(key)
+        if isinstance(v, dict):
+            v = v.get("href") or v.get("url")
+        if isinstance(v, str) and v.startswith("http"):
+            return v
+    bodies = [e.get("summary", "") or ""] + [c.get("value", "") for c in e.get("content") or []]
+    for body in bodies:
+        m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', body)
+        if m and not m.group(1).startswith("data:") and "pixel" not in m.group(1) and "feeds.feedburner" not in m.group(1):
+            return html.unescape(m.group(1))
     return ""
 
 

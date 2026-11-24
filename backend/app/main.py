@@ -244,6 +244,28 @@ async def archive(category: str, request: Request):
     return {"category": category, "stories": await get_json(request.app.state.r, archive_key(category)) or []}
 
 
+@app.get("/api/img")
+async def image_proxy(u: str, request: Request):
+    """Fallback for news photos that a site refuses to show inside apps (hotlink protection):
+    the server fetches the picture the way a browser on that site would and passes it on."""
+    from urllib.parse import urlparse
+    from fastapi.responses import Response
+    p = urlparse(u)
+    host = (p.hostname or "").lower()
+    if p.scheme not in ("http", "https") or "." not in host or host.endswith((".internal", ".local", "localhost")) \
+            or host.replace(".", "").isdigit() or ":" in host:
+        raise HTTPException(400, "bad image url")
+    try:
+        r = await request.app.state.bal.http.get(u, timeout=10, follow_redirects=True, headers={
+            "User-Agent": news.UA, "Referer": f"{p.scheme}://{p.netloc}/", "Accept": "image/avif,image/webp,image/*,*/*;q=0.8"})
+    except Exception:  # noqa: BLE001
+        raise HTTPException(502, "image fetch failed")
+    ctype = r.headers.get("content-type", "")
+    if r.status_code >= 400 or not ctype.startswith("image/") or len(r.content) > 6_000_000:
+        raise HTTPException(404, "not an image")
+    return Response(r.content, media_type=ctype, headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/api/debug")
 async def debug(request: Request):
     """Is the server reaching the RSS feeds, and is the ingester publishing to Redis?"""
@@ -257,7 +279,7 @@ async def debug(request: Request):
         at = float(await r.get(f"feed:{cat}:at") or 0)
         out["categories"][cat] = {
             "top5_age_minutes": round((time.time() - at) / 60, 1) if at else None,
-            "top5": [s["title"][:90] for s in (await get_json(r, f"feed:{cat}") or [])],
+            "top5": [{"title": s["title"][:90], "image": s.get("image", "")[:120]} for s in (await get_json(r, f"feed:{cat}") or [])],
             "archived_today": len(await get_json(r, archive_key(cat)) or []),
             "last_ingest": await get_json(r, f"ingest:last:{cat}"),
         }

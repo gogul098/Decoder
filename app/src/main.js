@@ -62,7 +62,14 @@ const clip = (s, big = false) => s.image ? `
     <img src="${esc(s.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" decoding="async">
     ${big && s.image_credit ? `<figcaption>Photo: ${esc(s.image_credit)}</figcaption>` : ""}</figure>` : "";
 function hideBrokenClips(root) {
+  // If a news site blocks its photo inside the app, retry once through our server; if that
+  // fails too, drop the clipping and let the card fall back to its plain layout.
   root.querySelectorAll(".clip img").forEach((img) => img.addEventListener("error", () => {
+    if (!img.dataset.proxied && apiBase() && /^https?:/.test(img.src)) {
+      img.dataset.proxied = "1";
+      img.src = `${apiBase()}/api/img?u=${encodeURIComponent(img.src)}`;
+      return;
+    }
     img.closest(".leaf")?.classList.remove("has-clip");
     img.closest(".clip")?.remove();
   }));

@@ -84,6 +84,10 @@ async def ingest(r: aioredis.Redis, category: str, rotate: bool = False) -> dict
         new = pool[:5] if not rotate else pool[:5]
         if not rotate and len(new) < 5:          # keep current stories to fill the list when news is slow
             new += [o for o in old if not _seen(o["title"], new)][: 5 - len(new)]
+        if not settings.news_mock:                # photos for stories whose feed item had none
+            from .images import add_missing_images
+            log["images_added"] = await add_missing_images(new, r)
+        log["with_image"] = sum(1 for s in new if s.get("image"))
         retired = old if rotate else [o for o in old if not _seen(o["title"], new)]
         archive = [_brief(o, now) for o in retired if not _seen(o["title"], archive)] + archive
         pipe = r.pipeline()
@@ -93,7 +97,7 @@ async def ingest(r: aioredis.Redis, category: str, rotate: bool = False) -> dict
         pipe.set(f"feed:{category}:at", str(now))
         pipe.set(archive_key(category), json.dumps(archive[:60]), ex=36 * 3600)
         await pipe.execute()
-        changed = [s["id"] for s in new] != [s["id"] for s in old]
+        changed = [(s["id"], s.get("image")) for s in new] != [(s["id"], s.get("image")) for s in old]
         log.update(new=[s["title"][:80] for s in new], archived=len(retired), archive_size=len(archive))
         if changed:
             receivers = await r.publish(NEWS_CHANNEL, json.dumps(
