@@ -1,4 +1,4 @@
 {
-  "api_base": "",
+  "api_base": "https://decoded-api-v0tv.onrender.com",
   "note": "Every installed app reads this file on launch. Put your Render address in api_base (e.g. https://decoded-api.onrender.com) and push; apps switch to it without a new APK."
 }
