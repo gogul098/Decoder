@@ -149,7 +149,7 @@ function turnPage(dir, render) {
   front.className = "face front";
   const back = document.createElement("div");
   back.className = "face back";
-  back.innerHTML = `<b>${esc(nextTurn.label || (dir === "back" ? "5" : "→"))}</b><i>${dir === "back" ? "Back to the top five" : "Decoding…"}</i>`;
+  back.innerHTML = `<b>${esc(nextTurn.label || (dir === "back" ? "5" : "→"))}</b>`;
   nextTurn = { color: null, label: "" };
   const copy = page.cloneNode(true);
   copy.removeAttribute("id");
@@ -274,9 +274,17 @@ function home(cat) {
       `<button class="tab" role="tab" style="--c:var(${CAT_COLOR[c.id]})" aria-selected="${c.id === cat}" data-cat="${c.id}">${esc(c.label)}</button>`).join("")}</nav>
     <div id="fresh"></div>
     <div id="list"></div>`;
+  const order = CATS.map((c) => c.id);
   view.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
-    if (b.dataset.cat !== cat) history.replaceState(null, "", `#/c/${b.dataset.cat}`), home(b.dataset.cat);
+    if (b.dataset.cat !== cat) switchTopic(b.dataset.cat, order.indexOf(b.dataset.cat) > order.indexOf(cat) ? 1 : -1);
   }));
+  // keep the selected topic visible in the tab bar
+  const tabs = view.querySelector(".tabs"), sel = view.querySelector('.tab[aria-selected="true"]');
+  if (tabs && sel) tabs.scrollLeft = sel.offsetLeft - (tabs.clientWidth - sel.offsetWidth) / 2;
+  if (!store.get("swipe_tip", "")) {
+    store.set("swipe_tip", "1");
+    setTimeout(() => toast("Tip: swipe left or right to change topic"), 2800);
+  }
   if (!apiBase()) return needSetup();
   renderList(cat);
   if (state.pending[cat]) showFresh(cat);
@@ -584,6 +592,66 @@ async function refreshNow() {
   }
 }
 
+// ---------------- swipe between topics ----------------
+// Swipe left for the next topic, right for the previous one (in tab order, no wrap-around).
+// The gesture locks to an axis after a few pixels, so vertical scrolling and pull-to-refresh
+// are unaffected, and swipes that start on the tab bar scroll the tabs instead.
+function setupSwipe() {
+  let x0 = null, y0 = 0, axis = null, dx = 0;
+  const order = CATS.map((c) => c.id);
+  const neighbour = (dir) => order[order.indexOf(current.cat) + dir];
+
+  window.addEventListener("touchstart", (e) => {
+    if (current.name !== "home" || refreshing || e.target.closest(".tabs") || document.querySelector(".sheet-wrap,.turn-wrap")) return;
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; axis = null; dx = 0;
+  }, { passive: true });
+
+  window.addEventListener("touchmove", (e) => {
+    if (x0 === null) return;
+    const mx = e.touches[0].clientX - x0, my = e.touches[0].clientY - y0;
+    if (!axis && Math.hypot(mx, my) > 10) axis = Math.abs(mx) > Math.abs(my) * 1.2 ? "x" : "y";
+    if (axis !== "x") return;
+    e.preventDefault();
+    dx = mx;
+    const edge = !neighbour(dx < 0 ? 1 : -1);               // nothing further this way: resist
+    view.style.transform = `translateX(${edge ? dx * 0.15 : dx * 0.45}px)`;
+    view.style.opacity = String(1 - Math.min(0.35, Math.abs(dx) / 900));
+  }, { passive: false });
+
+  window.addEventListener("touchend", () => {
+    if (x0 === null) return;
+    const next = axis === "x" && Math.abs(dx) > 70 ? neighbour(dx < 0 ? 1 : -1) : null;
+    x0 = null;
+    if (axis !== "x") return;
+    if (!next) {
+      view.style.transition = "transform .25s cubic-bezier(.2,.8,.2,1), opacity .25s";
+      view.style.transform = ""; view.style.opacity = "";
+      setTimeout(() => { view.style.transition = ""; }, 260);
+      return;
+    }
+    switchTopic(next, dx < 0 ? 1 : -1);
+  });
+}
+
+function switchTopic(cat, dir) {
+  if (reduced) { history.replaceState(null, "", `#/c/${cat}`); home(cat); return; }
+  view.style.transition = "transform .16s ease-in, opacity .16s ease-in";
+  view.style.transform = `translateX(${dir * -40}%)`;
+  view.style.opacity = "0";
+  setTimeout(() => {
+    history.replaceState(null, "", `#/c/${cat}`);
+    home(cat);
+    window.scrollTo(0, 0);
+    view.style.transition = "none";
+    view.style.transform = `translateX(${dir * 40}%)`;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      view.style.transition = "transform .3s cubic-bezier(.2,.8,.2,1), opacity .3s";
+      view.style.transform = ""; view.style.opacity = "";
+      setTimeout(() => { view.style.transition = ""; }, 320);
+    }));
+  }, 160);
+}
+
 // ---------------- intro ----------------
 function splash() {
   if (reduced) return Promise.resolve();
@@ -633,6 +701,7 @@ window.addEventListener("hashchange", route);
 splash();
 route();
 setupPull();
+setupSwipe();
 (async () => {
   if (!apiBase()) await checkConfig();          // first launch: learn the server address
   connectLive();
