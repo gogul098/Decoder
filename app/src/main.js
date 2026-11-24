@@ -2,7 +2,7 @@ import "@fontsource-variable/inter";
 import "@fontsource-variable/newsreader";
 import "@fontsource-variable/newsreader/wght-italic.css";
 import "./style.css";
-import { Capacitor, CapacitorHttp } from "@capacitor/core";
+import { Capacitor, CapacitorHttp, registerPlugin } from "@capacitor/core";
 
 const view = document.getElementById("view");
 const page = document.getElementById("page");
@@ -45,6 +45,14 @@ const THEMES = [
   { id: "grape", name: "Grape", desk: "#f2eff8", paper: "#fdfbff", dots: ["#ffd6a5", "#ff8fc6", "#a0c4ff", "#bdb2ff"] },
 ];
 const darkMQ = matchMedia("(prefers-color-scheme: dark)");
+// Native side (widget + 3–4 hourly alerts) gets the same server, theme and alert setting.
+const Native = registerPlugin("DecodedNative");
+function syncNative() {
+  if (!isNative) return;
+  Native.sync({ api: apiBase(), theme: store.get("theme", "classic"), mode: store.get("mode", "system"),
+    alerts: store.get("alerts", "on") === "on" }).catch(() => {});
+}
+
 function applyAppearance() {
   const root = document.documentElement;
   const mode = store.get("mode", "system");
@@ -52,6 +60,7 @@ function applyAppearance() {
   root.dataset.theme = store.get("theme", "classic");
   const desk = getComputedStyle(root).getPropertyValue("--desk").trim();
   document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", desk));
+  syncNative();
 }
 darkMQ.addEventListener?.("change", applyAppearance);
 applyAppearance();
@@ -240,6 +249,7 @@ async function checkConfig() {
     if (!remote || remote === store.get("api_remote", "")) return;
     const before = apiBase();
     store.set("api_remote", remote);
+    syncNative();
     if (apiBase() !== before) {                // only when the user hasn't typed their own address
       state.feeds = {};
       connectLive();
@@ -534,6 +544,10 @@ function settingsView() {
         <button class="swatch" data-theme="${t.id}" aria-pressed="${store.get("theme", "classic") === t.id}" style="--sw-desk:${t.desk};--sw-paper:${t.paper}">
           <span class="mini"><span class="dots">${t.dots.map((c) => `<i style="background:${c}"></i>`).join("")}</span><span class="lines"></span></span>
           <b>${t.name}</b></button>`).join("")}</div>
+      <h2 class="sec" style="--c:var(--pink)">News alerts</h2>
+      <label class="switch-row"><span><b>New-story alerts</b><br><span class="note" style="margin:0">A ring every 3–4 hours when fresh stories arrive. The home-screen widget updates at the same time.</span></span>
+        <input type="checkbox" id="alerts" ${store.get("alerts", "on") === "on" ? "checked" : ""}><i class="switch"></i></label>
+      <p class="note">Add the widget: long-press your home screen → Widgets → Decoded.</p>
       <h2 class="sec" style="--c:var(--mint)">App version</h2>
       <p style="margin:0 0 12px">Decoded ${esc(VERSION)}${BUILD ? ` · build ${BUILD}` : ""}</p>
       <button class="btn" id="check">Check for updates</button>
@@ -543,6 +557,12 @@ function settingsView() {
     store.set("mode", b.dataset.mode); applyAppearance();
     view.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", x === b));
   }));
+  view.querySelector("#alerts").addEventListener("change", (e) => {
+    store.set("alerts", e.target.checked ? "on" : "off");
+    if (e.target.checked && isNative) Native.requestNotifications().catch(() => {});
+    syncNative();
+    toast(e.target.checked ? "Alerts on: every 3–4 hours" : "Alerts off");
+  });
   view.querySelectorAll(".swatch").forEach((b) => b.addEventListener("click", () => {
     store.set("theme", b.dataset.theme); applyAppearance();
     view.querySelectorAll(".swatch").forEach((x) => x.setAttribute("aria-pressed", x === b));
@@ -764,7 +784,19 @@ setupSwipe();
   connectLive();
   if (current.name === "home" && apiBase()) home(current.cat);
   backgroundChecks();
+  syncNative();
+  if (isNative && !store.get("asked_notify", "")) {   // alerts are on by default: ask once, after the intro
+    store.set("asked_notify", "1");
+    setTimeout(() => Native.requestNotifications().catch(() => {}), 3000);
+  }
 })();
+
+// decoded://s/<id> from the widget or a notification opens that story
+function openLink(url) {
+  const m = /^decoded:\/\/s\/([\w-]+)/.exec(url || "");
+  if (m) location.hash = `#/s/${m[1]}`;
+  else if (/^decoded:\/\//.test(url || "") && current.name !== "home") location.hash = `#/c/${store.get("cat", "tech")}`;
+}
 
 if (isNative) {
   import("@capacitor/app").then(({ App }) => {
@@ -772,5 +804,7 @@ if (isNative) {
       if (current.name === "home") App.exitApp(); else location.hash = `#/c/${store.get("cat", "tech")}`;
     });
     App.addListener("resume", () => { if (!es || es.readyState === 2) connectLive(); backgroundChecks(); });
+    App.addListener("appUrlOpen", ({ url }) => openLink(url));
+    App.getLaunchUrl().then((r) => r?.url && setTimeout(() => openLink(r.url), 600)).catch(() => {});
   });
 }

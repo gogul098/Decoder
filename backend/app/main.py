@@ -244,6 +244,33 @@ async def archive(category: str, request: Request):
     return {"category": category, "stories": await get_json(request.app.state.r, archive_key(category)) or []}
 
 
+@app.get("/api/digest")
+async def digest(request: Request, per: int = 2):
+    """For the home-screen widget and the 3–4 hourly alerts: the top stories of every topic,
+    interleaved (1st of each topic, then 2nd of each...). If the server was asleep and the
+    news is old, it fetches fresh news first (waits up to ~50 s)."""
+    r = request.app.state.r
+    cats = list(news.CATEGORIES)
+    ages = [time.time() - float(await r.get(f"feed:{c}:at") or 0) for c in cats]
+    if max(ages) > settings.feed_ttl:
+        before = float(await r.get(f"feed:{cats[-1]}:at") or 0)
+        await request.app.state.q.enqueue_job("ingest_all", _job_id=f"ingest:{int(time.time() // 60)}")
+        for _ in range(50):
+            await asyncio.sleep(1)
+            if float(await r.get(f"feed:{cats[-1]}:at") or 0) > before:
+                break
+    feeds = {c: await get_json(r, f"feed:{c}") or [] for c in cats}
+    items = []
+    for rank in range(max(1, min(per, 5))):
+        for c in cats:
+            if rank < len(feeds[c]):
+                s = feeds[c][rank]
+                items.append({"id": s["id"], "title": s["title"], "category": c, "label": news.CATEGORIES[c]["label"],
+                              "rank": rank + 1, "published": s["published"], "outlets": s.get("outlets", 1),
+                              "image": s.get("image", "")})
+    return {"updated": time.time(), "items": items}
+
+
 @app.get("/api/img")
 async def image_proxy(u: str, request: Request):
     """Fallback for news photos that a site refuses to show inside apps (hotlink protection):
