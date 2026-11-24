@@ -317,3 +317,18 @@ body { overscroll-behavior-y: contain; }
 .lesson { margin: 0 0 6px; font: 500 17.5px/1.45 var(--serif); }
 .apply { margin: 0; font: 15px/1.5 var(--sans); color: var(--ink2); }
 .apply .tag { margin: 0 6px 0 0; background: var(--mint); vertical-align: 1px; }
+
+/* ---------- Earlier today (archive) ---------- */
+.archive { margin: 26px 0 8px; border-top: 1px solid var(--rule); }
+.archive-head { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 2px; border: 0; background: none;
+  font: 600 15px var(--sans); color: var(--ink); text-align: left; }
+.archive-head .count { font: 700 12px/1.6 var(--sans); color: #161614; background: var(--yellow); border: 1px solid var(--edge); border-radius: 999px; padding: 0 8px; }
+.archive-head i { margin-left: auto; width: 10px; height: 10px; border-right: 2px solid var(--ink2); border-bottom: 2px solid var(--ink2); transform: rotate(45deg) translateY(-3px); transition: transform .25s; }
+.archive.open .archive-head i { transform: rotate(-135deg) translateY(-2px); }
+.archive-list { overflow: hidden; max-height: 0; transition: max-height .35s ease; }
+.archive.open .archive-list { max-height: 4000px; }
+.archived { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 2px 12px; padding: 12px 2px; border-bottom: 1px solid var(--rule); }
+.archived .when { grid-row: span 2; font: 500 12.5px var(--sans); color: var(--mute); padding-top: 3px; }
+.archived .t { font: 17px/1.35 var(--serif); color: var(--ink2); }
+.archived .m { font-size: 12.5px; color: var(--mute); }
+.archived:active .t { color: var(--ink); }

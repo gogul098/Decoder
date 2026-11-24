@@ -33,27 +33,37 @@ def _topic(t: str) -> str:
 CATEGORIES: dict[str, dict] = {
     "tech": {
         "label": "Tech & AI",
-        "feeds": [_topic("TECHNOLOGY"), _search("artificial intelligence OR AI model OR chip OR startup")],
+        "feeds": [_topic("TECHNOLOGY"), _search("artificial intelligence OR AI model OR chip OR startup"),
+                  "https://feeds.bbci.co.uk/news/technology/rss.xml", "https://techcrunch.com/feed/",
+                  "https://www.theverge.com/rss/index.xml", "https://www.thehindu.com/sci-tech/technology/feeder/default.rss"],
     },
     "india": {
         "label": "Indian Politics",
-        "feeds": [_topic("NATION"), _search("India government OR parliament OR election OR minister")],
+        "feeds": [_topic("NATION"), _search("India government OR parliament OR election OR minister"),
+                  "https://www.thehindu.com/news/national/feeder/default.rss", "https://indianexpress.com/section/political-pulse/feed/",
+                  "https://feeds.feedburner.com/ndtvnews-india-news"],
     },
     "world": {
         "label": "World Politics",
-        "feeds": [_topic("WORLD"), _search("diplomacy OR summit OR sanctions OR president OR war")],
+        "feeds": [_topic("WORLD"), _search("diplomacy OR summit OR sanctions OR president OR war"),
+                  "https://feeds.bbci.co.uk/news/world/rss.xml", "https://www.thehindu.com/news/international/feeder/default.rss",
+                  "https://www.aljazeera.com/xml/rss/all.xml"],
     },
     "markets": {
         "label": "Markets",
-        "feeds": [_topic("BUSINESS"), _search("Sensex OR Nifty OR stock market OR shares OR Wall Street OR RBI rate")],
+        "feeds": [_topic("BUSINESS"), _search("Sensex OR Nifty OR stock market OR shares OR Wall Street OR RBI rate"),
+                  "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms", "https://www.livemint.com/rss/markets",
+                  "https://feeds.bbci.co.uk/news/business/rss.xml"],
     },
     "oil": {
         "label": "Oil & Energy",
-        "feeds": [_search("crude oil price OR Brent OR OPEC OR petrol diesel price OR natural gas price")],
+        "feeds": [_search("crude oil price OR Brent OR OPEC OR petrol diesel price OR natural gas price"),
+                  "https://oilprice.com/rss/main", "https://economictimes.indiatimes.com/industry/energy/oil-gas/rssfeeds/13358350.cms"],
     },
     "security": {
         "label": "Terror & Security",
-        "feeds": [_search("terror attack OR terrorism OR militants OR blast OR security forces")],
+        "feeds": [_search("terror attack OR terrorism OR militants OR blast OR security forces"),
+                  _search("encounter militants OR IED OR NIA OR counter-terror")],
     },
 }
 
@@ -113,13 +123,27 @@ def parse_feed(xml: str) -> list[dict]:
     return items
 
 
-async def fetch(url: str, client: httpx.AsyncClient) -> list[dict]:
+UA = ("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) "
+      "Chrome/124.0 Mobile Safari/537.36 NewsDecoder/1.1")
+
+
+async def fetch(url: str, client: httpx.AsyncClient, report: list | None = None) -> list[dict]:
+    """Fetch one RSS feed. If `report` is given, append what happened (for /api/debug)."""
+    from urllib.parse import urlparse
+    host = urlparse(url).netloc + (urlparse(url).path[:40] if "google" not in url else "/" + url.split("/rss/")[-1][:40])
     try:
-        r = await client.get(url, timeout=12, follow_redirects=True,
-                             headers={"User-Agent": "Mozilla/5.0 NewsDecoder/1.0"})
-        r.raise_for_status()
-        return parse_feed(r.text)
-    except Exception:
+        r = await client.get(url, timeout=12, follow_redirects=True, headers={"User-Agent": UA})
+        if r.status_code >= 400:
+            if report is not None:
+                report.append({"feed": host, "status": r.status_code, "items": 0})
+            return []
+        items = parse_feed(r.text)
+        if report is not None:
+            report.append({"feed": host, "status": r.status_code, "items": len(items)})
+        return items
+    except Exception as e:  # noqa: BLE001
+        if report is not None:
+            report.append({"feed": host, "status": "error", "error": str(e)[:120], "items": 0})
         return []
 
 
@@ -151,7 +175,7 @@ def rank(groups: list[list[dict]], now: float | None = None, top: int = 5) -> li
         outlets = {m["source"] for m in members}
         newest = max(m["published"] for m in members)
         age_h = max(0.0, (now - newest) / 3600)
-        score = len(outlets) * 2.0 + max(0.0, 6 - age_h) * 0.5
+        score = len(outlets) * 2.0 + max(0.0, 12 - age_h) * 0.6   # coverage + a strong push for fresh news
         scored.append((score, members))
     scored.sort(key=lambda s: -s[0])
     out = []
@@ -174,16 +198,19 @@ def rank(groups: list[list[dict]], now: float | None = None, top: int = 5) -> li
     return out
 
 
-async def top_stories(category: str) -> list[dict]:
+async def top_stories(category: str, top: int = 5, report: list | None = None) -> list[dict]:
+    """Ranked stories for a category, best first. Items older than 36 h are dropped."""
     if settings.news_mock:
         from .mock import mock_items
         items = mock_items(category)
     else:
+        import asyncio
         async with httpx.AsyncClient() as client:
-            items = []
-            for url in CATEGORIES[category]["feeds"]:
-                items += await fetch(url, client)
-    stories = rank(cluster(items))
+            results = await asyncio.gather(*[fetch(u, client, report) for u in CATEGORIES[category]["feeds"]])
+        items = [it for res in results for it in res]
+    cutoff = time.time() - 36 * 3600
+    items = [it for it in items if it["published"] >= cutoff]
+    stories = rank(cluster(items), top=top)
     for s in stories:
         s["category"] = category
     return stories

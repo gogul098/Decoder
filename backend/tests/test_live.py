@@ -16,8 +16,9 @@ async def test_ingest_publishes_only_when_top5_changes():
     ps = r.pubsub()
     await ps.subscribe(store.NEWS_CHANNEL)
     await ps.get_message(timeout=1)                      # subscribe confirmation
-    first = await store.ingest(r, "tech")
-    assert len(first) == 5 and await r.exists(f"story:{first[0]['id']}")
+    log = await store.ingest(r, "tech")
+    first = json.loads(await r.get("feed:tech"))
+    assert len(first) == 5 and await r.exists(f"story:{first[0]['id']}") and "published" in log["result"]
     msg = await ps.get_message(timeout=1)
     assert json.loads(msg["data"])["category"] == "tech"
     await store.ingest(r, "tech")                        # same list again: no new publish
@@ -38,3 +39,20 @@ async def test_one_subscription_fans_out_to_many_listeners():
         assert await asyncio.wait_for(c.get(), 1) == "progress"
     assert not hub.subs                                  # listeners cleaned up when phones disconnect
     await hub.stop()
+
+
+@pytest.mark.asyncio
+async def test_refresh_archives_current_top5_and_brings_unseen_stories():
+    settings.news_mock = True
+    r = fakeredis.FakeAsyncRedis(decode_responses=True)
+    await store.ingest(r, "tech")
+    before = json.loads(await r.get("feed:tech"))
+    log = await store.ingest(r, "tech", rotate=True)          # mock tech has 6 stories
+    after = json.loads(await r.get("feed:tech"))
+    archive = json.loads(await r.get(store.archive_key("tech")))
+    assert len(archive) == 5 and {a["id"] for a in archive} == {b["id"] for b in before}
+    assert len(after) == 1 and after[0]["id"] not in {b["id"] for b in before}
+    log2 = await store.ingest(r, "tech", rotate=True)         # nothing unseen left: keep the list
+    assert "nothing new" in log2["result"] and json.loads(await r.get("feed:tech")) == after
+    await store.ingest(r, "tech")                             # the regular ingest never brings archived stories back
+    assert all(s["id"] not in {a["id"] for a in archive} for s in json.loads(await r.get("feed:tech")))

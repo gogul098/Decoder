@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from . import news
 from .balancer import Balancer
 from .config import settings
-from .store import NEWS_CHANNEL, decode_channel, get_json, redis_client, snapshot
+from .store import NEWS_CHANNEL, archive_key, decode_channel, get_json, redis_client, snapshot
 
 log = logging.getLogger("api")
 HEARTBEAT = 15
@@ -226,12 +226,42 @@ async def decode_stream(story_id: str, request: Request):
 
 
 @app.get("/api/refresh")
-async def refresh(request: Request):
-    """Pull-to-refresh: ask a worker to fetch RSS now (at most once per 30 s for everyone).
-    The fresh lists arrive on the live stream and in /api/feed/<category>."""
-    slot = int(time.time() // 30)
-    job = await request.app.state.q.enqueue_job("ingest_all", _job_id=f"refresh:{slot}")
+async def refresh(request: Request, category: str = "tech"):
+    """Pull-to-refresh: archive this category's top 5 and fetch the next unseen stories
+    (at most once per 20 s per category). Results arrive on the stream and in /api/feed."""
+    if category not in news.CATEGORIES:
+        raise HTTPException(404, "unknown category")
+    slot = int(time.time() // 20)
+    job = await request.app.state.q.enqueue_job("refresh_category", category, _job_id=f"refresh:{category}:{slot}")
     return {"queued": job is not None, "at": time.time()}
+
+
+@app.get("/api/archive/{category}")
+async def archive(category: str, request: Request):
+    """Stories that were in today's top 5 earlier (IST day)."""
+    if category not in news.CATEGORIES:
+        raise HTTPException(404, "unknown category")
+    return {"category": category, "stories": await get_json(request.app.state.r, archive_key(category)) or []}
+
+
+@app.get("/api/debug")
+async def debug(request: Request):
+    """Is the server reaching the RSS feeds, and is the ingester publishing to Redis?"""
+    r = request.app.state.r
+    out = {"now": time.time(), "embedded_worker": settings.embedded_worker,
+           "queue_length": await r.zcard("arq:queue"),
+           "api_processes_subscribed": (await r.execute_command("PUBSUB", "NUMPAT")) // 2,   # 2 patterns each
+           "phones_connected_here": sum(len(v) for v in request.app.state.hub.subs.values()),
+           "categories": {}}
+    for cat in news.CATEGORIES:
+        at = float(await r.get(f"feed:{cat}:at") or 0)
+        out["categories"][cat] = {
+            "top5_age_minutes": round((time.time() - at) / 60, 1) if at else None,
+            "top5": [s["title"][:90] for s in (await get_json(r, f"feed:{cat}") or [])],
+            "archived_today": len(await get_json(r, archive_key(cat)) or []),
+            "last_ingest": await get_json(r, f"ingest:last:{cat}"),
+        }
+    return out
 
 
 @app.get("/api/feed/{category}")

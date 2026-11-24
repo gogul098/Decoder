@@ -34,33 +34,87 @@ async def get_json(r: aioredis.Redis, key: str):
     return json.loads(v) if v else None
 
 
-async def ingest(r: aioredis.Redis, category: str) -> list[dict]:
-    """Pull RSS for one category, rank the top 5, store it and publish it to subscribers.
-    Only the ingester calls this, so phones opening the app never trigger RSS fetches."""
+def _ist_day() -> str:
+    from datetime import datetime, timedelta, timezone
+    return datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
+
+
+def archive_key(category: str) -> str:
+    return f"archive:{category}:{_ist_day()}"
+
+
+def _brief(s: dict, now: float) -> dict:
+    return {"id": s["id"], "title": s["title"], "published": s["published"], "outlets": s.get("outlets", 1),
+            "source": (s.get("sources") or [{}])[0].get("name", ""), "category": s.get("category", ""), "archived": now}
+
+
+def _seen(title: str, pool: list[dict]) -> bool:
+    """Same event as anything in pool? (titles change between ingests, so compare words, not ids)"""
+    tk = news.tokens(title)
+    return any(p["id"] == news.story_id(title) or news.jaccard(tk, news.tokens(p["title"])) >= 0.34 for p in pool)
+
+
+async def ingest(r: aioredis.Redis, category: str, rotate: bool = False) -> dict:
+    """Pull RSS for one category and update its top 5.
+
+    Stories that leave the top 5 go to today's archive (kept for the day, IST). Archived stories
+    never come back into the top 5. With rotate=True (pull-to-refresh) the whole current top 5 is
+    archived and replaced by the best stories not seen yet today. Only the ingester calls this,
+    so opening the app never triggers RSS fetches by itself."""
+    now = time.time()
+    log = {"category": category, "at": now, "rotate": rotate, "feeds": []}
     if not await r.set(f"lock:ingest:{category}", "1", nx=True, ex=120):
-        return await get_json(r, f"feed:{category}") or []
+        log["result"] = "skipped: another ingest is running"
+        return log
     try:
-        stories = await news.top_stories(category)
-        if not stories:                      # feed down: keep serving what we had
-            return await get_json(r, f"feed:{category}") or []
-        now = time.time()
-        old_ids = [s["id"] for s in (await get_json(r, f"feed:{category}") or [])]
+        candidates = await news.top_stories(category, top=30, report=log["feeds"])
+        log["candidates"] = len(candidates)
+        old = await get_json(r, f"feed:{category}") or []
+        archive = await get_json(r, archive_key(category)) or []
+        pool = [c for c in candidates if not _seen(c["title"], archive)]
+        if rotate:
+            pool = [c for c in pool if not _seen(c["title"], old)]
+        if not candidates:
+            log["result"] = "no items from any feed (blocked or down); kept the old list"
+            return log
+        if rotate and not pool:
+            log["result"] = "nothing new since the last refresh; kept the current list"
+            await r.set(f"feed:{category}:at", str(now))
+            return log
+        new = pool[:5] if not rotate else pool[:5]
+        if not rotate and len(new) < 5:          # keep current stories to fill the list when news is slow
+            new += [o for o in old if not _seen(o["title"], new)][: 5 - len(new)]
+        retired = old if rotate else [o for o in old if not _seen(o["title"], new)]
+        archive = [_brief(o, now) for o in retired if not _seen(o["title"], archive)] + archive
         pipe = r.pipeline()
-        for s in stories:
+        for s in new:
             pipe.set(f"story:{s['id']}", json.dumps(s), ex=3 * 24 * 3600)
-        pipe.set(f"feed:{category}", json.dumps(stories))
+        pipe.set(f"feed:{category}", json.dumps(new))
         pipe.set(f"feed:{category}:at", str(now))
+        pipe.set(archive_key(category), json.dumps(archive[:60]), ex=36 * 3600)
         await pipe.execute()
-        if [s["id"] for s in stories] != old_ids:
-            await r.publish(NEWS_CHANNEL, json.dumps({"category": category, "updated": now, "stories": stories}))
-        return stories
+        changed = [s["id"] for s in new] != [s["id"] for s in old]
+        log.update(new=[s["title"][:80] for s in new], archived=len(retired), archive_size=len(archive))
+        if changed:
+            receivers = await r.publish(NEWS_CHANNEL, json.dumps(
+                {"category": category, "updated": now, "stories": new, "archive": archive[:60]}))
+            log["result"] = f"published new top 5 to Redis ({receivers} API process(es) listening)"
+        else:
+            log["result"] = "same top 5 as before; nothing published"
+        return log
+    except Exception as e:  # noqa: BLE001
+        log["result"] = f"error: {e}"
+        return log
     finally:
         await r.delete(f"lock:ingest:{category}")
+        await r.set(f"ingest:last:{category}", json.dumps(log), ex=7 * 24 * 3600)
 
 
 async def snapshot(r: aioredis.Redis, category: str) -> dict:
     stories = await get_json(r, f"feed:{category}") or []
-    return {"category": category, "updated": float(await r.get(f"feed:{category}:at") or 0), "stories": stories}
+    archive = await get_json(r, archive_key(category)) or []
+    return {"category": category, "updated": float(await r.get(f"feed:{category}:at") or 0),
+            "stories": stories, "archive": archive}
 
 
 async def set_status(r: aioredis.Redis, story_id: str, stage: str, ttl: int = 600, **extra) -> None:

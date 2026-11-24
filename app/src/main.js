@@ -308,6 +308,32 @@ function renderList(cat, highlight = []) {
     nextTurn = { color: RANK_COLOR[(+a.dataset.rank - 1) % 5], label: a.dataset.rank };
     setTimeout(() => { location.hash = a.getAttribute("href"); }, reduced ? 0 : 170);
   }));
+  renderArchive(cat);
+}
+
+// "Earlier today": stories that were in the top 5 before a refresh (kept for the day)
+const archiveOpen = {};
+function renderArchive(cat) {
+  const list = document.getElementById("list");
+  const items = [...(state.feeds[cat]?.archive || [])].sort((a, b) => b.published - a.published);
+  list.querySelector(".archive")?.remove();
+  if (!items.length) return;
+  const time = (ts) => new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+  list.insertAdjacentHTML("beforeend", `
+    <section class="archive${archiveOpen[cat] ? " open" : ""}">
+      <button class="archive-head" aria-expanded="${!!archiveOpen[cat]}">
+        <span>Earlier today</span><span class="count">${items.length}</span><i></i></button>
+      <div class="archive-list">${items.map((a) => `
+        <a href="#/s/${a.id}" class="archived"><span class="when">${time(a.published)}</span>
+          <span class="t">${esc(a.title)}</span><span class="m">${esc(a.source || "")}${a.outlets > 1 ? ` · ${a.outlets} outlets` : ""}</span></a>`).join("")}
+      </div>
+    </section>`);
+  list.querySelector(".archive-head").addEventListener("click", (e) => {
+    archiveOpen[cat] = !archiveOpen[cat];
+    const sec = e.currentTarget.parentElement;
+    sec.classList.toggle("open", archiveOpen[cat]);
+    e.currentTarget.setAttribute("aria-expanded", archiveOpen[cat]);
+  });
 }
 
 function showFresh(cat) {
@@ -538,7 +564,7 @@ async function refreshNow() {
   const started = Date.now();
   try {
     if (!es || es.readyState === 2) connectLive();
-    await getJSON("/api/refresh");
+    await getJSON(`/api/refresh?category=${cat}`);
     // wait for the ingester: the feed's timestamp moves when it has run (max ~25 s)
     while (Date.now() - started < 25000) {
       await new Promise((r) => setTimeout(r, 1500));
@@ -553,7 +579,8 @@ async function refreshNow() {
     document.getElementById("fresh") && (document.getElementById("fresh").innerHTML = "");
     const fresh = (state.feeds[cat]?.stories || []).filter((s) => !oldIds.has(s.id)).map((s) => s.id);
     renderList(cat, fresh);
-    toast(fresh.length ? `${fresh.length} new ${fresh.length === 1 ? "story" : "stories"}` : "You're up to date");
+    toast(fresh.length ? `${fresh.length} fresh ${fresh.length === 1 ? "story" : "stories"} · older ones moved to Earlier today`
+                       : "Nothing new yet. Try again in a bit");
   }
 }
 

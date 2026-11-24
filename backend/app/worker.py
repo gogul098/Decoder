@@ -64,15 +64,21 @@ async def decode_story(ctx, story_id: str) -> str:
 
 async def ingest_all(ctx):
     for cat in news.CATEGORIES:
-        stories = await ingest(ctx["r"], cat)
+        await ingest(ctx["r"], cat)
         if settings.prewarm:
-            for s in stories:
+            for s in await get_json(ctx["r"], f"feed:{cat}") or []:
                 await ctx["redis"].enqueue_job("decode_story", s["id"], _job_id=f"decode:{s['id']}")
+
+
+async def refresh_category(ctx, category: str):
+    """Pull-to-refresh: archive the current top 5 and bring in the next unseen stories."""
+    return (await ingest(ctx["r"], category, rotate=True)).get("result")
 
 
 class WorkerSettings:
     functions = [func(decode_story, keep_result=0, timeout=180, max_tries=2),
-                 func(ingest_all, keep_result=0, timeout=300)]
+                 func(ingest_all, keep_result=0, timeout=300),
+                 func(refresh_category, keep_result=0, timeout=120)]
     cron_jobs = [cron(ingest_all, minute=set(range(0, 60, max(1, settings.feed_ttl // 60))),
                       run_at_startup=True, unique=True)]
     on_startup = startup
