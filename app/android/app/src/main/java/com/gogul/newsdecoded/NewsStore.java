@@ -113,4 +113,22 @@ final class NewsStore {
             default: return p.colors[3]; // tech
         }
     }
+
+    /** Widget words in the reader's language: [top stories, fetching, empty]. */
+    static String[] widgetWords(Context c) {
+        switch (prefs(c).getString("lang", "en")) {
+            case "hi": return new String[]{"बड़ी ख़बरें", "ताज़ा ख़बरें ला रहे हैं…", "आज की ख़बरें आ रही हैं…\n↻ दबाएँ अगर कुछ न दिखे।"};
+            case "ta": return new String[]{"முக்கியச் செய்திகள்", "புதிய செய்திகளைப் பெறுகிறது…", "இன்றைய செய்திகள் வருகின்றன…\nஎதுவும் தெரியவில்லை என்றால் ↻ அழுத்தவும்."};
+            case "te": return new String[]{"ముఖ్య వార్తలు", "తాజా వార్తలు తెస్తోంది…", "నేటి వార్తలు వస్తున్నాయి…\nఏమీ కనిపించకపోతే ↻ నొక్కండి."};
+            case "kn": return new String[]{"ಪ್ರಮುಖ ಸುದ್ದಿ", "ಹೊಸ ಸುದ್ದಿ ತರುತ್ತಿದೆ…", "ಇಂದಿನ ಸುದ್ದಿ ಬರುತ್ತಿದೆ…\nಏನೂ ಕಾಣದಿದ್ದರೆ ↻ ಒತ್ತಿ."};
+            case "ml": return new String[]{"പ്രധാന വാർത്തകൾ", "പുതിയ വാർത്തകൾ കൊണ്ടുവരുന്നു…", "ഇന്നത്തെ വാർത്തകൾ വരുന്നു…\nഒന്നും കാണുന്നില്ലെങ്കിൽ ↻ അമർത്തുക."};
+            case "mr": return new String[]{"मोठ्या बातम्या", "ताज्या बातम्या आणत आहे…", "आजच्या बातम्या येत आहेत…\nकाही न दिसल्यास ↻ दाबा."};
+            case "bn": return new String[]{"প্রধান খবর", "নতুন খবর আনছে…", "আজকের খবর আসছে…\nকিছু না দেখালে ↻ চাপুন।"};
+            case "gu": return new String[]{"મુખ્ય સમાચાર", "તાજા સમાચાર લાવે છે…", "આજના સમાચાર આવી રહ્યા છે…\nકંઈ ન દેખાય તો ↻ દબાવો."};
+            case "pa": return new String[]{"ਮੁੱਖ ਖ਼ਬਰਾਂ", "ਤਾਜ਼ਾ ਖ਼ਬਰਾਂ ਲਿਆ ਰਿਹਾ ਹੈ…", "ਅੱਜ ਦੀਆਂ ਖ਼ਬਰਾਂ ਆ ਰਹੀਆਂ ਹਨ…\nਕੁਝ ਨਾ ਦਿਖੇ ਤਾਂ ↻ ਦਬਾਓ।"};
+            case "or": return new String[]{"ମୁଖ୍ୟ ଖବର", "ନୂଆ ଖବର ଆଣୁଛି…", "ଆଜିର ଖବର ଆସୁଛି…\nକିଛି ନ ଦେଖାଗଲେ ↻ ଦବାନ୍ତୁ।"};
+            case "ur": return new String[]{"اہم خبریں", "تازہ خبریں لا رہا ہے…", "آج کی خبریں آ رہی ہیں…\nکچھ نظر نہ آئے تو ↻ دبائیں۔"};
+            default: return new String[]{"Top stories", "Fetching fresh news…", "Fetching today's stories…\nTap ↻ if nothing appears."};
+        }
+    }
 }

@@ -83,10 +83,12 @@ public class NewsWidget extends AppWidgetProvider {
 
         long updated = NewsStore.prefs(c).getLong("updated", 0);
         boolean refreshing = NewsStore.prefs(c).getBoolean("refreshing", false);
-        String sub = refreshing ? "Fetching fresh news…"
-                : updated > 0 ? "Top stories · " + DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date(updated))
-                : "Top stories";
+        String[] w = NewsStore.widgetWords(c);
+        String sub = refreshing ? w[1]
+                : updated > 0 ? w[0] + " · " + DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date(updated))
+                : w[0];
         v.setTextViewText(R.id.widget_sub, sub);
+        v.setTextViewText(R.id.widget_empty, w[2]);
 
         // open the app from the header
         Intent open = new Intent(c, MainActivity.class);

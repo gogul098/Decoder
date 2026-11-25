@@ -22,12 +22,16 @@ public class DecodedNativePlugin extends Plugin {
         if (api != null && !api.isEmpty()) e.putString("api", api);
         e.putString("theme", call.getString("theme", "classic"));
         e.putString("mode", call.getString("mode", "system"));
+        String lang = call.getString("lang", "en");
+        String oldLang = NewsStore.prefs(getContext()).getString("lang", "en");
+        e.putString("lang", lang == null ? "en" : lang);
         Boolean alerts = call.getBoolean("alerts", true);
         e.putBoolean("alerts", alerts == null || alerts);
         e.apply();
         try {
             NewsSync.schedule(getContext());
             NewsWidget.updateAll(getContext());
+            if (lang != null && !lang.equals(oldLang)) NewsSync.refreshNow(getContext());   // widget in the new language
         } catch (Throwable t) {
             android.util.Log.w("Decoded", "widget/alerts sync failed", t);
         }

@@ -114,9 +114,12 @@ class Balancer:
         ranked.sort(key=lambda x: -x[0])
         return ranked
 
-    async def _take(self, exclude: set[str]) -> Lane:
+    async def _take(self, exclude: set[str], min_weight: int = 0) -> Lane:
         minute = int(time.time() // 60)
-        for _, lane in await self._snapshot():
+        ranked = await self._snapshot()
+        if min_weight and any(l.spec.weight >= min_weight for _, l in ranked):
+            ranked = [(s, l) for s, l in ranked if l.spec.weight >= min_weight]
+        for _, lane in ranked:
             if lane.id in exclude:
                 continue
             got = await self._acquire(keys=[lane.k(f"rpm:{minute}"), lane.k("cool")], args=[lane.spec.rpm])
@@ -145,7 +148,8 @@ class Balancer:
         return out
 
     # ---------- the call ----------
-    async def chat_json(self, messages: list[dict], max_attempts: int = 5, wait_budget: float = 90) -> tuple[dict, str]:
+    async def chat_json(self, messages: list[dict], max_attempts: int = 5, wait_budget: float = 90,
+                        min_weight: int = 0) -> tuple[dict, str]:
         """Return (parsed JSON, model used). Waits for capacity up to wait_budget seconds."""
         tried: set[str] = set()
         deadline = time.time() + wait_budget
@@ -153,7 +157,7 @@ class Balancer:
         attempts = 0
         while attempts < max_attempts:
             try:
-                lane = await self._take(tried)
+                lane = await self._take(tried, min_weight)
             except NoCapacity:
                 if len(tried) >= len(self.lanes):
                     tried.clear()          # every lane tried once; allow retries on recovered lanes

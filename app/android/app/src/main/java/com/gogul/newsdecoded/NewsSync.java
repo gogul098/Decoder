@@ -72,7 +72,7 @@ final class NewsSync {
             String api = NewsStore.apiBase(c);
             if (api.isEmpty()) return;
             // the free server may be asleep: allow time for it to wake and collect news
-            JSONObject d = new JSONObject(NewsStore.httpGet(api + "/api/digest?per=3", 110000));
+            JSONObject d = new JSONObject(NewsStore.httpGet(api + "/api/digest?per=3&lang=" + prefs.getString("lang", "en"), 110000));
             JSONArray items = d.getJSONArray("items");
             prefs.edit().putString("items", items.toString()).putLong("updated", System.currentTimeMillis()).apply();
             if (alert && prefs.getBoolean("alerts", true)) notifyNew(c, items);
@@ -134,8 +134,8 @@ final class NewsSync {
         }
 
         JSONObject first = fresh.get(0);
-        String title = fresh.size() == 1 ? first.getString("title") : fresh.size() + " new stories, decoded";
-        String text = fresh.size() == 1 ? first.optString("label") + " · tap to read why it happened"
+        String title = fresh.size() == 1 ? first.getString("title") : newStories(prefs.getString("lang", "en"), fresh.size());
+        String text = fresh.size() == 1 ? first.optString("label")
                 : first.optString("label") + ": " + first.getString("title");
 
         Notification.InboxStyle inbox = new Notification.InboxStyle().setSummaryText("Decoded");
@@ -160,5 +160,23 @@ final class NewsSync {
           .setNumber(fresh.size());
         if (Build.VERSION.SDK_INT < 26) nb.setDefaults(Notification.DEFAULT_ALL);
         nm.notify(5150, nb.build());
+    }
+
+    /** "N new stories" in the reader's language. */
+    private static String newStories(String lang, int n) {
+        switch (lang == null ? "en" : lang) {
+            case "hi": return n + " नई ख़बरें";
+            case "ta": return n + " புதிய செய்திகள்";
+            case "te": return n + " కొత్త వార్తలు";
+            case "kn": return n + " ಹೊಸ ಸುದ್ದಿಗಳು";
+            case "ml": return n + " പുതിയ വാർത്തകൾ";
+            case "mr": return n + " नवीन बातम्या";
+            case "bn": return n + "টি নতুন খবর";
+            case "gu": return n + " નવા સમાચાર";
+            case "pa": return n + " ਨਵੀਆਂ ਖ਼ਬਰਾਂ";
+            case "or": return n + "ଟି ନୂଆ ଖବର";
+            case "ur": return n + " نئی خبریں";
+            default: return n + " new stories, decoded";
+        }
     }
 }

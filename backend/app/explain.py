@@ -122,14 +122,15 @@ def _day(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%d %b %Y")
 
 
-def build_messages(story: dict, leads: list[dict]) -> list[dict]:
+def build_messages(story: dict, leads: list[dict], lang: str = "en") -> list[dict]:
+    from .langs import instruction
     lines = [f"TODAY: {_day(time.time())}", f"CATEGORY: {story.get('category', '')}",
              f"MAIN HEADLINE: {story['title']}", f"SNIPPET: {story.get('summary', '')}",
              "SAME STORY AS REPORTED BY OTHER OUTLETS:"]
     lines += [f"- {s['name']}: {s.get('title', '')}" for s in story.get("sources", [])]
     lines.append("PREVIOUS NEWS LEADS (oldest first):")
     lines += [f"- [{_day(l['published'])}] {l['title']} ({l['source']})" for l in leads] or ["- none found"]
-    return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": "\n".join(lines)}]
+    return [{"role": "system", "content": SYSTEM + instruction(lang)}, {"role": "user", "content": "\n".join(lines)}]
 
 
 def validate(raw: dict) -> dict:

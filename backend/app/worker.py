@@ -17,6 +17,7 @@ from . import news
 from .balancer import Balancer
 from .config import settings
 from .explain import build_messages, validate
+from .langs import norm, story_key
 from .store import decode_channel, get_json, ingest, redis_client, set_status
 
 log = logging.getLogger("worker")
@@ -34,31 +35,33 @@ async def shutdown(ctx):
     await ctx["r"].aclose()
 
 
-async def decode_story(ctx, story_id: str) -> str:
+async def decode_story(ctx, story_id: str, lang: str = "en") -> str:
     r = ctx["r"]
-    done = await r.get(f"explain2:{story_id}")
+    lang = norm(lang)
+    sk = story_key(story_id, lang)                  # one cache entry per story per language
+    done = await r.get(f"explain2:{sk}")
     if done:
-        await r.publish(decode_channel(story_id), json.dumps({"stage": "ready", "result": json.loads(done)}))
+        await r.publish(decode_channel(sk), json.dumps({"stage": "ready", "result": json.loads(done)}))
         return "cached"
     story = await get_json(r, f"story:{story_id}")
     if not story:
-        await set_status(r, story_id, "error:This story has expired. Pull down to refresh.", ttl=60)
+        await set_status(r, sk, "error:This story has expired. Pull down to refresh.", ttl=60)
         return "missing"
     try:
-        await set_status(r, story_id, "finding")
+        await set_status(r, sk, "finding")
         leads = await news.previous_leads(story)
-        await set_status(r, story_id, "writing", leads=len(leads))
-        raw, model = await ctx["bal"].chat_json(build_messages(story, leads))
+        await set_status(r, sk, "writing", leads=len(leads))
+        raw, model = await ctx["bal"].chat_json(build_messages(story, leads, lang), min_weight=3 if lang != "en" else 0)
         result = validate(raw)
     except Exception as e:  # noqa: BLE001 — any failure becomes a readable status
-        log.exception("decode failed for %s", story_id)
-        await set_status(r, story_id, f"error:{str(e)[:160]}", ttl=60)
+        log.exception("decode failed for %s", sk)
+        await set_status(r, sk, f"error:{str(e)[:160]}", ttl=60)
         return "error"
-    result.update({"id": story_id, "model": model, "story": story,
+    result.update({"id": story_id, "lang": lang, "model": model, "story": story,
                    "leads": [{k: l[k] for k in ("title", "source", "url", "published")} for l in leads]})
-    await r.set(f"explain2:{story_id}", json.dumps(result), ex=settings.explain_ttl)
-    await r.delete(f"explain2:{story_id}:status")
-    await r.publish(decode_channel(story_id), json.dumps({"stage": "ready", "result": result}))
+    await r.set(f"explain2:{sk}", json.dumps(result), ex=settings.explain_ttl)
+    await r.delete(f"explain2:{sk}:status")
+    await r.publish(decode_channel(sk), json.dumps({"stage": "ready", "result": result}))
     return "ok"
 
 

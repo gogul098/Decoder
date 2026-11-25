@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from . import news
 from .balancer import Balancer
 from .config import settings
+from .langs import LABELS, norm, story_key
 from .store import NEWS_CHANNEL, archive_key, decode_channel, get_json, redis_client, snapshot
 
 log = logging.getLogger("api")
@@ -89,6 +90,7 @@ async def lifespan(app: FastAPI):
     app.state.r = redis_client()
     app.state.q = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     app.state.bal = Balancer(app.state.r)
+    await app.state.bal.discover()
     app.state.hub = Broadcaster(app.state.r)
     app.state.hub.start()
     worker = None
@@ -175,33 +177,35 @@ async def stream(request: Request):
     return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
-async def _ensure_queued(request: Request, story_id: str) -> dict:
+async def _ensure_queued(request: Request, story_id: str, lang: str = "en") -> dict:
     """Return the current decode state, queueing the job if nobody has yet."""
     r = request.app.state.r
-    done = await get_json(r, f"explain2:{story_id}")
+    sk = story_key(story_id, lang)
+    done = await get_json(r, f"explain2:{sk}")
     if done:
         return {"stage": "ready", "result": done}
     if not await r.exists(f"story:{story_id}"):
         return {"stage": "error", "message": "Story not found. Pull down to refresh."}
-    status = await r.get(f"explain2:{story_id}:status")
+    status = await r.get(f"explain2:{sk}:status")
     if status and status.startswith("error:"):
-        await r.delete(f"explain2:{story_id}:status")       # the next open retries
+        await r.delete(f"explain2:{sk}:status")       # the next open retries
         return {"stage": "error", "message": status[6:]}
     if not status:
-        await r.set(f"explain2:{story_id}:status", "queued", ex=600)
-        await request.app.state.q.enqueue_job("decode_story", story_id, _job_id=f"decode:{story_id}")
+        await r.set(f"explain2:{sk}:status", "queued", ex=600)
+        await request.app.state.q.enqueue_job("decode_story", story_id, lang, _job_id=f"decode:{sk}")
         status = "queued"
     return {"stage": status, "queue": await r.zcard("arq:queue")}
 
 
 @app.get("/api/decode/{story_id}/stream")
-async def decode_stream(story_id: str, request: Request):
+async def decode_stream(story_id: str, request: Request, lang: str = "en"):
     """Live progress of one story: queued -> finding -> writing -> ready (with the result)."""
     hub = request.app.state.hub
 
     async def gen():
-        with hub.listen(decode_channel(story_id)) as q:      # subscribe BEFORE checking, so nothing is missed
-            state = await _ensure_queued(request, story_id)
+        lg = norm(lang)
+        with hub.listen(decode_channel(story_key(story_id, lg))) as q:   # subscribe BEFORE checking, so nothing is missed
+            state = await _ensure_queued(request, story_id, lg)
             yield sse("ready" if state["stage"] == "ready" else "error" if state["stage"] == "error" else "progress", state)
             if state["stage"] in ("ready", "error"):
                 return
@@ -245,7 +249,7 @@ async def archive(category: str, request: Request):
 
 
 @app.get("/api/digest")
-async def digest(request: Request, per: int = 2):
+async def digest(request: Request, per: int = 2, lang: str = "en"):
     """For the home-screen widget and the 3–4 hourly alerts: the top stories of every topic,
     interleaved (1st of each topic, then 2nd of each...). If the server was asleep and the
     news is old, it fetches fresh news first (waits up to ~50 s)."""
@@ -268,7 +272,14 @@ async def digest(request: Request, per: int = 2):
                 items.append({"id": s["id"], "title": s["title"], "category": c, "label": news.CATEGORIES[c]["label"],
                               "rank": rank + 1, "published": s["published"], "outlets": s.get("outlets", 1),
                               "image": s.get("image", "")})
-    return {"updated": time.time(), "items": items}
+    lg = norm(lang)
+    if lg != "en" and items:
+        from .translate import titles
+        tr = await titles(r, request.app.state.bal, lg, [{"id": i["id"], "title": i["title"]} for i in items])
+        for i in items:
+            i["title"] = tr.get(i["id"], i["title"])
+            i["label"] = LABELS[lg].get(i["category"], i["label"])
+    return {"updated": time.time(), "lang": lg, "items": items}
 
 
 @app.get("/api/img")
@@ -322,9 +333,22 @@ async def get_feed(category: str, request: Request):
 
 
 @app.get("/api/decode/{story_id}")
-async def decode(story_id: str, request: Request):
+async def decode(story_id: str, request: Request, lang: str = "en"):
     """Plain JSON fallback for clients without SSE."""
-    return await _ensure_queued(request, story_id)
+    return await _ensure_queued(request, story_id, norm(lang))
+
+
+@app.get("/api/titles")
+async def translated_titles(request: Request, lang: str = "en", ids: str = ""):
+    """Headlines in the reader's language for the given story ids (list + archive)."""
+    from .translate import titles
+    r = request.app.state.r
+    items = []
+    for sid in [x for x in ids.split(",") if x][:60]:
+        s = await get_json(r, f"story:{sid}")
+        if s:
+            items.append({"id": sid, "title": s["title"]})
+    return {"lang": norm(lang), "titles": await titles(r, request.app.state.bal, norm(lang), items)}
 
 
 @app.get("/api/health")

@@ -112,7 +112,7 @@ main { max-width: 660px; margin: 0 auto; padding: 4px 20px calc(env(safe-area-in
   background: var(--c); border: var(--bw) solid var(--edge); margin-top: 2px; }
 .leaf h2 { font: 500 20px/1.3 var(--serif); margin: 0 0 8px; letter-spacing: -.005em; }
 .leaf .meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--mute); }
-.sheet.new .leaf::before { content: "New"; position: absolute; left: 16px; bottom: 16px; font: 700 10.5px var(--sans); color: #161614;
+.sheet.new .leaf::before { content: attr(data-new); position: absolute; left: 16px; bottom: 16px; font: 700 10.5px var(--sans); color: #161614;
   background: var(--yellow); border: 1px solid var(--edge); border-radius: 4px; padding: 0 4px; }
 
 .skel { height: 100px; margin-bottom: 14px; border-radius: 10px; background: var(--paper); border: 1px solid var(--rule); position: relative; overflow: hidden; }
@@ -387,3 +387,19 @@ body { overscroll-behavior-y: contain; }
 .switch-row input:focus-visible + .switch { outline: 2px solid var(--ink); outline-offset: 2px; }
 .crash { max-height: 220px; overflow: auto; font: 11.5px/1.45 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word;
   padding: 10px; border: 1px solid var(--rule); border-radius: 8px; background: var(--desk); color: var(--ink2); user-select: text; }
+
+/* ---------- languages ---------- */
+.langs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 6px 0 4px; }
+.lang { display: grid; gap: 1px; justify-items: start; min-height: 54px; padding: 8px 10px; text-align: left; border-radius: 10px;
+  border: var(--bw) solid var(--rule); background: var(--paper); color: var(--ink); }
+.lang b { font: 600 16px/1.3 var(--sans); }
+.lang span { font-size: 11.5px; color: var(--mute); }
+.lang[aria-pressed="true"] { border-color: var(--edge); background: color-mix(in srgb, var(--yellow) 35%, var(--paper)); box-shadow: 2px 2px 0 var(--hard); }
+.langpick { max-height: 86vh; overflow: auto; }
+.langpick h2 { font: 500 26px/1.2 var(--serif); margin: 0 0 6px; }
+@media (max-width: 360px) { .langs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Indian scripts need a little more line height */
+html:not([lang="en"]) .leaf h2, html:not([lang="en"]) .narrative p, html:not([lang="en"]) .qa dd { line-height: 1.6; }
+html:not([lang="en"]) .paper h1 { line-height: 1.3; }
+/* Urdu reads right to left */
+html.rtl .paper .inner, html.rtl .masthead h1, html.rtl .leaf h2, html.rtl .archived .t { direction: rtl; text-align: right; }

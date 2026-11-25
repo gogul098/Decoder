@@ -2,6 +2,7 @@ import "@fontsource-variable/inter";
 import "@fontsource-variable/newsreader";
 import "@fontsource-variable/newsreader/wght-italic.css";
 import "./style.css";
+import { LANGS, t, setLang, getLang, speechLang, isRTL, guessLang } from "./i18n.js";
 import { Capacitor, CapacitorHttp, registerPlugin } from "@capacitor/core";
 
 const view = document.getElementById("view");
@@ -24,12 +25,7 @@ const VERSION = import.meta.env.VITE_VERSION || "dev";
 const REPO = import.meta.env.VITE_REPO || "gogul098/Decoder";
 
 const CATS = [
-  { id: "tech", label: "Tech & AI" },
-  { id: "india", label: "India" },
-  { id: "world", label: "World" },
-  { id: "markets", label: "Markets" },
-  { id: "oil", label: "Oil & Energy" },
-  { id: "security", label: "Security" },
+  { id: "tech" }, { id: "india" }, { id: "world" }, { id: "markets" }, { id: "oil" }, { id: "security" },
 ];
 const CAT_COLOR = { tech: "--blue", india: "--orange", world: "--mint", markets: "--lilac", oil: "--yellow", security: "--red" };
 const RANK_COLOR = ["--yellow", "--pink", "--mint", "--blue", "--lilac"];
@@ -50,7 +46,7 @@ const Native = registerPlugin("DecodedNative");
 function syncNative() {
   if (!isNative) return;
   Native.sync({ api: apiBase(), theme: store.get("theme", "classic"), mode: store.get("mode", "system"),
-    alerts: store.get("alerts", "on") === "on" }).catch(() => {});
+    alerts: store.get("alerts", "on") === "on", lang: getLang() }).catch(() => {});
 }
 
 function applyAppearance() {
@@ -69,7 +65,7 @@ const tilt = (id) => ((parseInt(id.slice(0, 4), 16) % 9) - 4) || 3;       // eac
 const clip = (s, big = false) => s.image ? `
   <figure class="clip${big ? " big" : ""}" style="--tilt:${tilt(s.id)}deg"><i class="pin"></i>
     <img src="${esc(s.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" decoding="async">
-    ${big && s.image_credit ? `<figcaption>Photo: ${esc(s.image_credit)}</figcaption>` : ""}</figure>` : "";
+    ${big && s.image_credit ? `<figcaption>${esc(s.image_credit)}</figcaption>` : ""}</figure>` : "";
 function hideBrokenClips(root) {
   // If a news site blocks its photo inside the app, retry once through our server; if that
   // fails too, drop the clipping and let the card fall back to its plain layout.
@@ -84,17 +80,38 @@ function hideBrokenClips(root) {
   }));
 }
 
-const catLabel = (id) => ({ tech: "Tech & AI", india: "Indian politics", world: "World politics", markets: "Stock markets", oil: "Oil & energy", security: "Terror & security" }[id] || id);
+const catLabel = (id) => t("cat_" + id);
 
 // ---------------- helpers ----------------
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// language: chosen once (first launch) and changeable in Settings
+setLang(store.get("lang", "") || guessLang());
+const locale = () => { try { new Intl.DateTimeFormat(speechLang()); return speechLang(); } catch { return "en-IN"; } };
 function ago(ts) {
   const m = Math.max(1, Math.round((Date.now() / 1000 - ts) / 60));
-  if (m < 60) return `${m} min ago`;
+  let rtf;
+  try { rtf = new Intl.RelativeTimeFormat(locale(), { numeric: "always", style: "short" }); } catch { rtf = new Intl.RelativeTimeFormat("en", { style: "short" }); }
+  if (m < 60) return rtf.format(-m, "minute");
   const h = Math.round(m / 60);
-  return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
+  return h < 24 ? rtf.format(-h, "hour") : rtf.format(-Math.round(h / 24), "day");
 }
-const today = () => new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
+const today = () => new Date().toLocaleDateString(locale(), { weekday: "long", day: "numeric", month: "long" });
+const outlets = (n) => (n > 1 ? t("outlets", { n }) : t("outlet"));
+// headlines in the reader's language (fetched from the server, cached here per language)
+const titleCache = {};
+const tr = (s) => (getLang() !== "en" && titleCache[getLang()]?.[s.id]) || s.title;
+async function translateTitles(stories) {
+  const lang = getLang();
+  if (lang === "en" || !apiBase()) return false;
+  const have = (titleCache[lang] ||= {});
+  const ids = [...new Set(stories.map((s) => s.id))].filter((id) => !have[id]);
+  if (!ids.length) return false;
+  try {
+    const d = await getJSON(`/api/titles?lang=${lang}&ids=${ids.join(",")}`);
+    Object.assign(have, d.titles || {});
+    return true;
+  } catch { return false; }
+}
 async function getJSON(path) {
   const r = await fetch(apiBase() + path, { headers: { Accept: "application/json" } });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `Server error ${r.status}`);
@@ -118,15 +135,15 @@ function setLive(s, text) { liveEl.dataset.state = s; liveEl.querySelector("span
 
 function connectLive() {
   if (es) es.close();
-  if (!apiBase()) { setLive("off", "Offline"); return; }
-  setLive("connecting", "Connecting");
+  if (!apiBase()) { setLive("off", t("offline")); return; }
+  setLive("connecting", t("connecting"));
   // free hosting sleeps when idle and takes ~1 min to wake; say so instead of looking stuck
-  const wake = setTimeout(() => { if (liveEl.dataset.state !== "live") setLive("connecting", "Waking server…"); }, 4000);
+  const wake = setTimeout(() => { if (liveEl.dataset.state !== "live") setLive("connecting", t("waking")); }, 4000);
   es = new EventSource(apiBase() + "/api/stream");
-  es.onopen = () => { clearTimeout(wake); setLive("live", "Live"); };
+  es.onopen = () => { clearTimeout(wake); setLive("live", t("live")); };
   let downSince = 0;
   es.onerror = () => {                                        // EventSource retries on its own
-    setLive("connecting", "Reconnecting");
+    setLive("connecting", t("reconnecting"));
     downSince = downSince || Date.now();
     if (Date.now() - downSince > 20000) { downSince = Date.now(); checkConfig(); }   // maybe the server moved
   };
@@ -159,17 +176,17 @@ function connectLive() {
 // ---------------- speech ----------------
 let speaking = false;
 async function speak(text, btn) {
-  const set = (on) => { speaking = on; if (btn) btn.innerHTML = `${on ? icon.stop : icon.play}${on ? "Stop" : "Listen"}`; };
+  const set = (on) => { speaking = on; if (btn) btn.innerHTML = `${on ? icon.stop : icon.play}${on ? t("stop") : t("listen")}`; };
   if (speaking) { await stopSpeech(); set(false); return; }
   set(true);
   try {
     if (isNative) {
       const { TextToSpeech } = await import("@capacitor-community/text-to-speech");
-      await TextToSpeech.speak({ text, lang: "en-IN", rate: 1.0, category: "playback" });
+      await TextToSpeech.speak({ text, lang: speechLang(), rate: 1.0, category: "playback" });
       set(false);
     } else if ("speechSynthesis" in window) {
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = "en-IN"; u.onend = u.onerror = () => set(false);
+      u.lang = speechLang(); u.onend = u.onerror = () => set(false);
       speechSynthesis.speak(u);
     } else set(false);
   } catch { set(false); }
@@ -254,7 +271,7 @@ async function checkConfig() {
       state.feeds = {};
       connectLive();
       if (current.name === "home") home(current.cat);
-      if (before) toast("Switched to the new server");
+      if (before) toast(t("switched"));
     }
   } catch { /* offline or GitHub unreachable: try again next launch */ }
 }
@@ -276,11 +293,11 @@ function showUpdate(info) {
   wrap.innerHTML = `
     <div class="scrim"></div>
     <div class="update box" role="dialog" aria-labelledby="upd-title">
-      <span class="tag">Update available</span>
-      <h2 id="upd-title">Version ${esc(info.version)} is ready</h2>
+      <span class="tag">${esc(t("upd_tag"))}</span>
+      <h2 id="upd-title">${esc(t("upd_h", { v: info.version }))}</h2>
       <p class="upd-notes">${esc(info.notes || "Improvements and fixes.")}</p>
-      <p class="note">You have ${esc(VERSION)}. Tap download, then open the file when it finishes to install. Android may ask once to allow installs from your browser.</p>
-      <div class="upd-actions"><button class="btn solid" id="upd-go">Download update</button><button class="btn" id="upd-later">Later</button></div>
+      <p class="note">${esc(t("upd_note", { cur: VERSION }))}</p>
+      <div class="upd-actions"><button class="btn solid" id="upd-go">${esc(t("upd_go"))}</button><button class="btn" id="upd-later">${esc(t("later"))}</button></div>
     </div>`;
   document.body.appendChild(wrap);
   const close = () => { wrap.classList.add("out"); setTimeout(() => wrap.remove(), 250); };
@@ -303,9 +320,9 @@ const current = { name: "", cat: "", id: "" };
 const scrollMemo = {};
 
 function needSetup() {
-  view.innerHTML = `<div class="notice box" style="margin-top:24px"><h2>Getting things ready</h2>
-    <p>Decoded is looking for its news server. Check your internet connection; this usually takes a few seconds.</p>
-    <button class="btn solid" id="retry-setup">Try again</button></div>`;
+  view.innerHTML = `<div class="notice box" style="margin-top:24px"><h2>${esc(t("ready_h"))}</h2>
+    <p>${esc(t("ready_p"))}</p>
+    <button class="btn solid" id="retry-setup">${esc(t("try_again"))}</button></div>`;
   view.querySelector("#retry-setup").addEventListener("click", async () => {
     await checkConfig();
     if (apiBase()) { connectLive(); route(); }
@@ -319,9 +336,9 @@ function home(cat) {
   setCat(cat);
   view.innerHTML = `
     <p class="dateline">${esc(today())}</p>
-    <h1 class="title">Today's <em>top five</em></h1>
+    <h1 class="title">${esc(t("title_a"))} <em>${esc(t("title_b"))}</em></h1>
     <nav class="tabs" role="tablist">${CATS.map((c) =>
-      `<button class="tab" role="tab" style="--c:var(${CAT_COLOR[c.id]})" aria-selected="${c.id === cat}" data-cat="${c.id}">${esc(c.label)}</button>`).join("")}</nav>
+      `<button class="tab" role="tab" style="--c:var(${CAT_COLOR[c.id]})" aria-selected="${c.id === cat}" data-cat="${c.id}">${esc(t("tab_" + c.id))}</button>`).join("")}</nav>
     <div id="fresh"></div>
     <div id="list"></div>`;
   const order = CATS.map((c) => c.id);
@@ -333,7 +350,7 @@ function home(cat) {
   if (tabs && sel) tabs.scrollLeft = sel.offsetLeft - (tabs.clientWidth - sel.offsetWidth) / 2;
   if (!store.get("swipe_tip", "")) {
     store.set("swipe_tip", "1");
-    setTimeout(() => toast("Tip: swipe left or right to change topic"), 2800);
+    setTimeout(() => toast(t("swipe_tip")), 2800);
   }
   if (!apiBase()) return needSetup();
   renderList(cat);
@@ -346,16 +363,20 @@ function renderList(cat, highlight = []) {
   const feed = state.feeds[cat];
   if (!feed) { list.innerHTML = '<div class="skel"></div>'.repeat(5); return; }
   if (!feed.stories.length) {
-    list.innerHTML = `<div class="empty box"><p style="margin:0;color:var(--ink2)">${esc(state.status || "No stories yet. They'll appear here the moment they arrive.")}</p></div>`;
+    list.innerHTML = `<div class="empty box"><p style="margin:0;color:var(--ink2)">${esc(state.status || t("no_stories"))}</p></div>`;
     return;
   }
+  const pendingTr = getLang() !== "en" && [...feed.stories, ...(feed.archive || [])].some((x) => !titleCache[getLang()]?.[x.id]);
+  if (pendingTr) translateTitles([...feed.stories, ...(feed.archive || [])]).then((changed) => {
+    if (changed && current.name === "home" && current.cat === cat) renderList(cat, highlight);
+  });
   list.innerHTML = feed.stories.map((s, i) => `
     <a class="sheet${highlight.includes(s.id) ? " new" : ""}" href="#/s/${s.id}" data-rank="${i + 1}"
        style="--c:var(${RANK_COLOR[i % 5]});animation-delay:${i * 60}ms">
-      <div class="frame"><div class="leaf${s.image ? " has-clip" : ""}">
+      <div class="frame"><div class="leaf${s.image ? " has-clip" : ""}" data-new="${esc(t("new_badge"))}">
         <div class="num">${i + 1}</div>
-        <div><h2>${esc(s.title)}</h2>
-          <div class="meta"><span>${s.outlets} ${s.outlets > 1 ? "outlets" : "outlet"}</span><span>${ago(s.published)}</span><span>${esc(s.sources[0]?.name || "")}</span></div>
+        <div><h2 dir="auto">${esc(tr(s))}</h2>
+          <div class="meta"><span>${esc(outlets(s.outlets))}</span><span>${ago(s.published)}</span><span>${esc(s.sources[0]?.name || "")}</span></div>
         </div>${clip(s)}
       </div></div>
       <svg class="corner" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polygon points="0,0 0,100 100,100"/></svg>
@@ -377,14 +398,14 @@ function renderArchive(cat) {
   const items = [...(state.feeds[cat]?.archive || [])].sort((a, b) => b.published - a.published);
   list.querySelector(".archive")?.remove();
   if (!items.length) return;
-  const time = (ts) => new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+  const time = (ts) => new Date(ts * 1000).toLocaleTimeString(locale(), { hour: "numeric", minute: "2-digit" });
   list.insertAdjacentHTML("beforeend", `
     <section class="archive${archiveOpen[cat] ? " open" : ""}">
       <button class="archive-head" aria-expanded="${!!archiveOpen[cat]}">
-        <span>Earlier today</span><span class="count">${items.length}</span><i></i></button>
+        <span>${esc(t("earlier"))}</span><span class="count">${items.length}</span><i></i></button>
       <div class="archive-list">${items.map((a) => `
         <a href="#/s/${a.id}" class="archived"><span class="when">${time(a.published)}</span>
-          <span class="t">${esc(a.title)}</span><span class="m">${esc(a.source || "")}${a.outlets > 1 ? ` · ${a.outlets} outlets` : ""}</span></a>`).join("")}
+          <span class="t" dir="auto">${esc(tr(a))}</span><span class="m">${esc(a.source || "")}${a.outlets > 1 ? ` · ${esc(outlets(a.outlets))}` : ""}</span></a>`).join("")}
       </div>
     </section>`);
   list.querySelector(".archive-head").addEventListener("click", (e) => {
@@ -398,7 +419,7 @@ function renderArchive(cat) {
 function showFresh(cat) {
   const box = document.getElementById("fresh");
   if (!box || current.cat !== cat) return;
-  box.innerHTML = `<div class="fresh"><button>New stories · show</button></div>`;
+  box.innerHTML = `<div class="fresh"><button>${esc(t("new_show"))}</button></div>`;
   box.querySelector("button").addEventListener("click", () => {
     const old = new Set((state.feeds[cat]?.stories || []).map((s) => s.id));
     state.feeds[cat] = state.pending[cat];
@@ -416,14 +437,14 @@ function story(id) {
   const known = Object.values(state.feeds).flatMap((f) => f.stories).find((s) => s.id === id);
   setCat(known?.category || store.get("cat", "tech"));
   view.innerHTML = `
-    <div class="story-top"><a class="back" href="#/c/${store.get("cat", "tech")}">← Top five</a></div>
+    <div class="story-top"><a class="back" href="#/c/${store.get("cat", "tech")}">${esc(t("back_top"))}</a></div>
     <article class="paper box">
-      <header class="masthead">${known ? `${kicker(known)}${clip(known, true)}<h1>${esc(known.title)}</h1>` : `<h1>Decoding…</h1>`}</header>
+      <header class="masthead">${known ? `${kicker(known)}${clip(known, true)}<h1 dir="auto">${esc(tr(known))}</h1>` : `<h1>${esc(t("decoding"))}</h1>`}</header>
       <div class="inner">
       <ol class="steps">
-        <li data-s="queued"><i></i>Waiting for a free model</li>
-        <li data-s="finding"><i></i>Reading earlier coverage</li>
-        <li data-s="writing"><i></i>Writing the story</li>
+        <li data-s="queued"><i></i>${esc(t("step_q"))}</li>
+        <li data-s="finding"><i></i>${esc(t("step_f"))}</li>
+        <li data-s="writing"><i></i>${esc(t("step_w"))}</li>
       </ol>
       <div class="lines">${'<span style="width:%"></span>'.repeat(5).replace(/%/g, () => 60 + Math.round(Math.random() * 40) + "%")}</div>
       </div>
@@ -440,7 +461,7 @@ function setStage(stage, extra = {}) {
   });
   if (stage === "writing" && extra.leads !== undefined) {
     const li = view.querySelector('.steps li[data-s="finding"]');
-    if (li) li.lastChild.textContent = `Read ${extra.leads} earlier report${extra.leads === 1 ? "" : "s"}`;
+    if (li) li.lastChild.textContent = t("read_n", { n: extra.leads });
   }
 }
 
@@ -453,10 +474,10 @@ function decode(id) {
     if (current.id !== mine || current.name !== "story") return;
     view.querySelector(".steps")?.remove(); view.querySelector(".lines")?.remove();
     view.querySelector(".inner").insertAdjacentHTML("beforeend",
-      `<div class="notice" style="padding:0;margin-top:18px"><p>${esc(msg)}</p><button class="btn" id="retry">Try again</button></div>`);
+      `<div class="notice" style="padding:0;margin-top:18px"><p>${esc(msg)}</p><button class="btn" id="retry">${esc(t("try_again"))}</button></div>`);
     view.querySelector("#retry").addEventListener("click", () => story(mine));
   };
-  const src = (decodeSrc = new EventSource(`${apiBase()}/api/decode/${id}/stream`));
+  const src = (decodeSrc = new EventSource(`${apiBase()}/api/decode/${id}/stream?lang=${getLang()}`));
   src.addEventListener("progress", (e) => { const d = JSON.parse(e.data); if (current.id === mine) setStage(d.stage, d); });
   src.addEventListener("ready", (e) => { finished = true; src.close(); if (current.id === mine && current.name === "story") renderStory(JSON.parse(e.data).result); });
   src.addEventListener("error", (e) => {
@@ -470,7 +491,7 @@ function decode(id) {
 async function poll(id, fail, tries = 0) {
   if (current.id !== id || current.name !== "story") return;
   try {
-    const d = await getJSON(`/api/decode/${id}`);
+    const d = await getJSON(`/api/decode/${id}?lang=${getLang()}`);
     if (d.stage === "ready") return renderStory(d.result);
     if (d.stage === "error") return fail(d.message);
     setStage(d.stage, d);
@@ -478,13 +499,13 @@ async function poll(id, fail, tries = 0) {
   setTimeout(() => poll(id, fail, tries + 1), 1200);
 }
 
-const kicker = (s) => `<p class="kicker"><span>${esc(catLabel(s.category))}</span><span>${s.outlets || 1} outlets</span><span>${ago(s.published || Date.now() / 1000)}</span></p>`;
+const kicker = (s) => `<p class="kicker"><span>${esc(catLabel(s.category))}</span><span>${esc(outlets(s.outlets || 1))}</span><span>${ago(s.published || Date.now() / 1000)}</span></p>`;
 const col = (i) => `--c:var(${RANK_COLOR[i % 5]})`;
 
 function renderStory(d) {
   const s = d.story || {};
   setCat(s.category);
-  const qa = [["What changed", d.what_changed], ["Why", d.why], ["How", d.how], ["When", d.when]].filter(([, v]) => v);
+  const qa = [[t("q_what"), d.what_changed], [t("q_why"), d.why], [t("q_how"), d.how], [t("q_when"), d.when]].filter(([, v]) => v);
   const sources = [
     ...(s.sources || []).map((x) => ({ name: x.name, title: x.title, url: x.url })),
     ...(d.leads || []).map((x) => ({ name: x.source, title: x.title, url: x.url, earlier: true })),
@@ -492,38 +513,38 @@ function renderStory(d) {
   let k = 0;
   const sec = (t) => `<h2 class="sec" style="${col(++k)}">${t}</h2>`;
   view.innerHTML = `
-    <div class="story-top"><a class="back" href="#/c/${store.get("cat", "tech")}">← Top five</a>
-      <button class="btn" id="listen">${icon.play}Listen</button></div>
+    <div class="story-top"><a class="back" href="#/c/${store.get("cat", "tech")}">${esc(t("back_top"))}</a>
+      <button class="btn" id="listen">${icon.play}${esc(t("listen"))}</button></div>
     <article class="paper box">
-      <header class="masthead" style="--c:var(${CAT_COLOR[s.category] || "--yellow"})">${kicker(s)}${clip(s, true)}<h1>${esc(d.headline || s.title)}</h1></header>
+      <header class="masthead" style="--c:var(${CAT_COLOR[s.category] || "--yellow"})">${kicker(s)}${clip(s, true)}<h1 dir="auto">${esc(d.headline || tr(s))}</h1></header>
       <div class="inner">
       ${d.hook ? `<p class="hook">${esc(d.hook)}</p>` : ""}
-      <div class="core"><span class="tag">The core idea</span><p>${esc(d.core_idea)}</p></div>
+      <div class="core"><span class="tag">${esc(t("core"))}</span><p>${esc(d.core_idea)}</p></div>
       ${qa.length ? `<dl class="qa">${qa.map(([q, v], i) => `<div><dt><span class="tag" style="${col(i + 1)}">${q}</span></dt><dd>${esc(v)}</dd></div>`).join("")}</dl>` : ""}
-      ${d.who_affected?.length ? `${sec("Who it affects")}<div class="who">${d.who_affected.map((w, i) =>
+      ${d.who_affected?.length ? `${sec(t("who"))}<div class="who">${d.who_affected.map((w, i) =>
         `<div style="${col(i + 2)}"><b>${esc(w.group)}</b>${w.impact ? `<span>${esc(w.impact)}</span>` : ""}</div>`).join("")}</div>` : ""}
-      ${d.backstory?.length ? `${sec("How we got here")}<ol class="timeline">${d.backstory.map((b, i) =>
+      ${d.backstory?.length ? `${sec(t("backstory"))}<ol class="timeline">${d.backstory.map((b, i) =>
         `<li style="${col(i)}">${b.date ? `<time>${esc(b.date)}</time><br>` : ""}${esc(b.event)}</li>`).join("")}</ol>` : ""}
-      ${d.outcome ? `${sec("Outcome so far")}<p class="outcome">${esc(d.outcome)}</p>` : ""}
-      ${d.future?.length ? `${sec("What could happen next")}<div class="future">${d.future.map((f) => `
-        <div class="scenario lk-${esc(f.likelihood)}"><span class="lk">${esc(f.likelihood[0].toUpperCase() + f.likelihood.slice(1))}</span>
-          <p>${esc(f.scenario)}</p>${f.signal ? `<p class="signal"><b>Sign to watch:</b> ${esc(f.signal)}</p>` : ""}</div>`).join("")}
-        <p class="note">Possibilities, not predictions.</p></div>` : ""}
-      ${d.lessons?.length ? `${sec("What we can learn")}<ol class="lessons">${d.lessons.map((l, i) => `
-        <li style="${col(i + 1)}"><p class="lesson">${esc(l.lesson)}</p>${l.apply ? `<p class="apply"><span class="tag">Apply it</span> ${esc(l.apply)}</p>` : ""}</li>`).join("")}</ol>` : ""}
-      ${["markets", "oil"].includes(s.category) ? `<p class="note">This explains what happened and why. It isn't financial advice.</p>` : ""}
-      ${d.narrative?.length ? `${sec("The full story")}<div class="narrative">${d.narrative.map((p) => `<p>${esc(p)}</p>`).join("")}</div>` : ""}
-      ${d.watch_next ? `${sec("What to watch next")}<p class="watch">${esc(d.watch_next)}</p>` : ""}
+      ${d.outcome ? `${sec(t("outcome"))}<p class="outcome">${esc(d.outcome)}</p>` : ""}
+      ${d.future?.length ? `${sec(t("future"))}<div class="future">${d.future.map((f) => `
+        <div class="scenario lk-${esc(f.likelihood)}"><span class="lk">${esc(t(f.likelihood))}</span>
+          <p>${esc(f.scenario)}</p>${f.signal ? `<p class="signal"><b>${esc(t("sign"))}</b> ${esc(f.signal)}</p>` : ""}</div>`).join("")}
+        <p class="note">${esc(t("not_pred"))}</p></div>` : ""}
+      ${d.lessons?.length ? `${sec(t("learn"))}<ol class="lessons">${d.lessons.map((l, i) => `
+        <li style="${col(i + 1)}"><p class="lesson">${esc(l.lesson)}</p>${l.apply ? `<p class="apply"><span class="tag">${esc(t("apply"))}</span> ${esc(l.apply)}</p>` : ""}</li>`).join("")}</ol>` : ""}
+      ${["markets", "oil"].includes(s.category) ? `<p class="note">${esc(t("fin_note"))}</p>` : ""}
+      ${d.narrative?.length ? `${sec(t("full"))}<div class="narrative">${d.narrative.map((p) => `<p>${esc(p)}</p>`).join("")}</div>` : ""}
+      ${d.watch_next ? `${sec(t("watch"))}<p class="watch">${esc(d.watch_next)}</p>` : ""}
       ${d.confidence_note ? `<p class="note">${esc(d.confidence_note)}</p>` : ""}
-      ${sec("Sources")}
-      <div class="sources">${sources.map((x, i) => `<a href="${esc(x.url)}" data-i="${i}"><b>${esc(x.name)}</b>${x.earlier ? " · earlier" : ""} — ${esc(x.title)}</a>`).join("")}</div>
-      <p class="fine">Written by AI (${esc(d.model)}) from the reports listed above. Check them for anything important.</p>
+      ${sec(t("sources"))}
+      <div class="sources">${sources.map((x, i) => `<a href="${esc(x.url)}" data-i="${i}"><b>${esc(x.name)}</b>${x.earlier ? " · " + esc(t("earlier_src")) : ""} — ${esc(x.title)}</a>`).join("")}</div>
+      <p class="fine">${esc(t("ai_note", { model: d.model }))}</p>
       </div>
     </article>`;
-  const script = [d.headline, d.hook, "The core idea. " + d.core_idea, d.what_changed && "What changed. " + d.what_changed,
-    d.why && "Why. " + d.why, d.outcome && "Outcome so far. " + d.outcome,
-    d.future?.length && "What could happen next. " + d.future.map((f) => `${f.likelihood}: ${f.scenario}`).join(". "),
-    d.lessons?.length && "What we can learn. " + d.lessons.map((l) => l.lesson).join(" "),
+  const script = [d.headline, d.hook, t("core") + ". " + d.core_idea, d.what_changed && t("q_what") + ". " + d.what_changed,
+    d.why && t("q_why") + ". " + d.why, d.outcome && t("outcome") + ". " + d.outcome,
+    d.future?.length && t("future") + ". " + d.future.map((f) => `${t(f.likelihood)}: ${f.scenario}`).join(". "),
+    d.lessons?.length && t("learn") + ". " + d.lessons.map((l) => l.lesson).join(" "),
     ...(d.narrative || [])].filter(Boolean).join("\n\n");
   hideBrokenClips(view);
   const lb = view.querySelector("#listen");
@@ -534,26 +555,32 @@ function renderStory(d) {
 function settingsView() {
   Object.assign(current, { name: "settings" });
   view.innerHTML = `
-    <div class="story-top"><a class="back" href="#/">← Back</a></div>
+    <div class="story-top"><a class="back" href="#/">${esc(t("back"))}</a></div>
     <div class="paper box" style="padding:24px 22px">
-      <h1 style="font-size:32px;margin-bottom:4px">Settings</h1>
-      <h2 class="sec" style="--c:var(--yellow)">Appearance</h2>
-      <div class="seg" role="group" aria-label="Light or dark">${[["system", "System"], ["light", "Light"], ["dark", "Dark"]].map(([v, l]) =>
+      <h1 style="font-size:32px;margin-bottom:4px">${esc(t("settings"))}</h1>
+      <h2 class="sec" style="--c:var(--blue)">${esc(t("language"))}</h2>
+      <div class="langs">${LANGS.map(([code, native, eng]) => `<button class="lang" data-lang="${code}" aria-pressed="${getLang() === code}"><b>${native}</b><span>${eng}</span></button>`).join("")}</div>
+      <h2 class="sec" style="--c:var(--yellow)">${esc(t("appearance"))}</h2>
+      <div class="seg" role="group" aria-label="Light or dark">${[["system", t("sys")], ["light", t("light")], ["dark", t("dark")]].map(([v, l]) =>
         `<button data-mode="${v}" aria-pressed="${store.get("mode", "system") === v}">${l}</button>`).join("")}</div>
       <div class="themes">${THEMES.map((t) => `
         <button class="swatch" data-theme="${t.id}" aria-pressed="${store.get("theme", "classic") === t.id}" style="--sw-desk:${t.desk};--sw-paper:${t.paper}">
           <span class="mini"><span class="dots">${t.dots.map((c) => `<i style="background:${c}"></i>`).join("")}</span><span class="lines"></span></span>
           <b>${t.name}</b></button>`).join("")}</div>
-      <h2 class="sec" style="--c:var(--pink)">News alerts</h2>
-      <label class="switch-row"><span><b>New-story alerts</b><br><span class="note" style="margin:0">A ring every 3–4 hours when fresh stories arrive. The home-screen widget updates at the same time.</span></span>
+      <h2 class="sec" style="--c:var(--pink)">${esc(t("alerts_h"))}</h2>
+      <label class="switch-row"><span><b>${esc(t("alerts_t"))}</b><br><span class="note" style="margin:0">${esc(t("alerts_d"))}</span></span>
         <input type="checkbox" id="alerts" ${store.get("alerts", "on") === "on" ? "checked" : ""}><i class="switch"></i></label>
-      <p class="note">Add the widget: long-press your home screen → Widgets → Decoded.</p>
+      <p class="note">${esc(t("widget_hint"))}</p>
       <div id="crash"></div>
-      <h2 class="sec" style="--c:var(--mint)">App version</h2>
+      <h2 class="sec" style="--c:var(--mint)">${esc(t("version"))}</h2>
       <p style="margin:0 0 12px">Decoded ${esc(VERSION)}${BUILD ? ` · build ${BUILD}` : ""}</p>
-      <button class="btn" id="check">Check for updates</button>
+      <button class="btn" id="check">${esc(t("check"))}</button>
       <p id="umsg" class="note"></p>
     </div>`;
+  view.querySelectorAll(".lang").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.lang === getLang()) return;
+    applyLanguage(b.dataset.lang);
+  }));
   view.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
     store.set("mode", b.dataset.mode); applyAppearance();
     view.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", x === b));
@@ -574,7 +601,7 @@ function settingsView() {
     store.set("alerts", e.target.checked ? "on" : "off");
     if (e.target.checked && isNative) Native.requestNotifications().catch(() => {});
     syncNative();
-    toast(e.target.checked ? "Alerts on: every 3–4 hours" : "Alerts off");
+    toast(e.target.checked ? t("alerts_on") : t("alerts_off"));
   });
   view.querySelectorAll(".swatch").forEach((b) => b.addEventListener("click", () => {
     store.set("theme", b.dataset.theme); applyAppearance();
@@ -582,31 +609,25 @@ function settingsView() {
   }));
   view.querySelector("#check").addEventListener("click", async () => {
     const m = view.querySelector("#umsg");
-    m.className = "note"; m.textContent = "Checking…";
+    m.className = "note"; m.textContent = t("checking");
     try {
       const r = await checkUpdate({ manual: true });
       m.className = "note ok";
-      m.textContent = r.newer ? `Version ${r.info.version} is available.` : "You're on the latest version.";
-    } catch { m.className = "note bad"; m.textContent = "Couldn't check right now. Try again later."; }
+      m.textContent = r.newer ? t("available", { v: r.info.version }) : t("latest");
+    } catch { m.className = "note bad"; m.textContent = t("check_fail"); }
   });
 }
 
 // ---------------- pull to refresh ----------------
 // Drag the list down from the top: a paper sheet's corner folds over as you pull; let go past
 // the line and the server fetches fresh RSS while a loading screen rotates through taglines.
-const TAGLINES = [
-  "Rounding up today's stories…",
-  "Reading between the headlines…",
-  "Finding out what actually changed…",
-  "Asking why, not just what…",
-  "Folding the news into shape…",
-];
+const TAGLINES = () => [t("tag1"), t("tag2"), t("tag3"), t("tag4"), t("tag5")];
 let refreshing = false;
 
 function setupPull() {
   const ptr = document.createElement("div");
   ptr.className = "ptr";
-  ptr.innerHTML = `<div class="ptr-sheet"><i></i></div><span>Pull to refresh</span>`;
+  ptr.innerHTML = `<div class="ptr-sheet"><i></i></div><span>${esc(t("pull"))}</span>`;
   document.body.appendChild(ptr);
   const label = ptr.querySelector("span");
   const LIMIT = 76;
@@ -627,7 +648,7 @@ function setupPull() {
     view.style.transform = `translateY(${pull}px)`;
     const ready = pull >= LIMIT;
     ptr.classList.toggle("ready", ready);
-    label.textContent = ready ? "Release to refresh" : "Pull to refresh";
+    label.textContent = ready ? t("release") : t("pull");
   }, { passive: false });
   window.addEventListener("touchend", () => {
     if (startY === null) return;
@@ -649,15 +670,15 @@ async function refreshNow() {
   if (list) {
     list.innerHTML = `<div class="loading box">
       <div class="stack"><b></b><b></b><b></b></div>
-      <p class="tagline" id="tagline">${TAGLINES[0]}</p>
-      <p class="note">Fetching the latest in ${esc(catLabel(cat))}</p></div>`;
+      <p class="tagline" id="tagline">${esc(TAGLINES()[0])}</p>
+      <p class="note">${esc(t("fetching", { cat: catLabel(cat) }))}</p></div>`;
   }
-  let t = 0;
+  let tt = 0;
   const rot = setInterval(() => {
     const el = document.getElementById("tagline");
     if (!el) return;
     el.classList.add("swap");
-    setTimeout(() => { el.textContent = TAGLINES[++t % TAGLINES.length]; el.classList.remove("swap"); }, 220);
+    setTimeout(() => { el.textContent = TAGLINES()[++tt % 5]; el.classList.remove("swap"); }, 220);
   }, 1800);
   const started = Date.now();
   try {
@@ -677,8 +698,7 @@ async function refreshNow() {
     document.getElementById("fresh") && (document.getElementById("fresh").innerHTML = "");
     const fresh = (state.feeds[cat]?.stories || []).filter((s) => !oldIds.has(s.id)).map((s) => s.id);
     renderList(cat, fresh);
-    toast(fresh.length ? `${fresh.length} fresh ${fresh.length === 1 ? "story" : "stories"} · older ones moved to Earlier today`
-                       : "Nothing new yet. Try again in a bit");
+    toast(fresh.length ? t("fresh_n", { n: fresh.length }) : t("nothing_new"));
   }
 }
 
@@ -742,6 +762,42 @@ function switchTopic(cat, dir) {
   }, 160);
 }
 
+// ---------------- language ----------------
+function applyLanguage(code, { rerender = true } = {}) {
+  setLang(code);
+  store.set("lang", code);
+  document.documentElement.lang = code;
+  document.documentElement.classList.toggle("rtl", isRTL());
+  syncNative();
+  if (!rerender) return;
+  setLive(liveEl.dataset.state, t({ live: "live", connecting: "connecting", off: "offline" }[liveEl.dataset.state] || "connecting"));
+  route();
+}
+
+function chooseLanguage() {
+  return new Promise((resolve) => {
+    const wrap = document.createElement("div");
+    wrap.className = "sheet-wrap";
+    const draw = () => {
+      wrap.innerHTML = `<div class="scrim"></div>
+        <div class="update box langpick" role="dialog">
+          <h2>${esc(t("choose_lang"))}</h2>
+          <p class="note" style="margin:0 0 12px">${esc(t("lang_note"))}</p>
+          <div class="langs">${LANGS.map(([code, native, eng]) => `<button class="lang" data-lang="${code}" aria-pressed="${getLang() === code}"><b>${native}</b><span>${eng}</span></button>`).join("")}</div>
+          <div class="upd-actions"><button class="btn solid" id="lang-go">${esc(t("continue"))}</button></div>
+        </div>`;
+      wrap.querySelectorAll(".lang").forEach((b) => b.addEventListener("click", () => { setLang(b.dataset.lang); draw(); }));
+      wrap.querySelector("#lang-go").addEventListener("click", () => {
+        applyLanguage(getLang(), { rerender: true });
+        wrap.classList.add("out");
+        setTimeout(() => { wrap.remove(); resolve(); }, 250);
+      });
+    };
+    draw();
+    document.body.appendChild(wrap);
+  });
+}
+
 // ---------------- intro ----------------
 function splash() {
   if (reduced) return Promise.resolve();
@@ -752,7 +808,7 @@ function splash() {
       <div class="splash-sheet"><svg class="splash-corner" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="0,0 0,100 100,100"/></svg>
         <span class="splash-d">D</span></div>
       <h1 class="splash-word">Decoded</h1>
-      <p class="splash-tag">Not just what happened.<br><em>Why it happened.</em></p>
+      <p class="splash-tag">${esc(t("splash1"))}<br><em>${esc(t("splash2"))}</em></p>
     </div>
     <div class="splash-dots"><i></i><i></i><i></i></div>`;
   document.body.appendChild(el);
@@ -788,7 +844,10 @@ function route() {
   else go();
 }
 window.addEventListener("hashchange", route);
-splash();
+document.documentElement.lang = getLang();
+document.documentElement.classList.toggle("rtl", isRTL());
+const intro = splash();
+if (!store.get("lang", "")) intro.then(() => chooseLanguage());
 route();
 setupPull();
 setupSwipe();
