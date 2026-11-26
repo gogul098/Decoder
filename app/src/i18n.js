@@ -16,6 +16,7 @@ export const LANGS = [
 ];
 
 const en = {
+  earlier_cov: "Earlier coverage", earlier_hint: "Tap a report to read it decoded, with its own why and backstory.",
   tab_tech: "Tech & AI", tab_india: "India", tab_world: "World", tab_markets: "Markets", tab_oil: "Oil & Energy", tab_security: "Security",
   cat_tech: "Tech & AI", cat_india: "Indian politics", cat_world: "World politics", cat_markets: "Stock markets", cat_oil: "Oil & energy", cat_security: "Terror & security",
   title_a: "Today's", title_b: "top five",
@@ -57,6 +58,7 @@ const en = {
 };
 
 const hi = {
+  earlier_cov: "पहले की कवरेज", earlier_hint: "किसी रिपोर्ट पर टैप करें और उसे उसके क्यों और पृष्ठभूमि के साथ डिकोड रूप में पढ़ें।",
   tab_tech: "टेक और AI", tab_india: "भारत", tab_world: "दुनिया", tab_markets: "बाज़ार", tab_oil: "तेल और ऊर्जा", tab_security: "सुरक्षा",
   cat_tech: "टेक और AI", cat_india: "भारतीय राजनीति", cat_world: "विश्व राजनीति", cat_markets: "शेयर बाज़ार", cat_oil: "तेल और ऊर्जा", cat_security: "आतंक और सुरक्षा",
   title_a: "आज की", title_b: "पाँच बड़ी ख़बरें",
@@ -98,6 +100,7 @@ const hi = {
 };
 
 const ta = {
+  earlier_cov: "முந்தைய செய்திகள்", earlier_hint: "ஒரு செய்தியைத் தொட்டு, அதன் காரணம் மற்றும் பின்னணியுடன் விளக்கமாகப் படியுங்கள்.",
   tab_tech: "டெக் & AI", tab_india: "இந்தியா", tab_world: "உலகம்", tab_markets: "சந்தை", tab_oil: "எண்ணெய் & எரிசக்தி", tab_security: "பாதுகாப்பு",
   cat_tech: "டெக் & AI", cat_india: "இந்திய அரசியல்", cat_world: "உலக அரசியல்", cat_markets: "பங்குச் சந்தை", cat_oil: "எண்ணெய் & எரிசக்தி", cat_security: "பயங்கரவாதம் & பாதுகாப்பு",
   title_a: "இன்றைய", title_b: "முக்கிய ஐந்து",
@@ -139,6 +142,7 @@ const ta = {
 };
 
 const te = {
+  earlier_cov: "మునుపటి కవరేజ్", earlier_hint: "ఏ నివేదికనైనా నొక్కి, దాని కారణం, నేపథ్యంతో డీకోడ్ చేసి చదవండి.",
   tab_tech: "టెక్ & AI", tab_india: "భారత్", tab_world: "ప్రపంచం", tab_markets: "మార్కెట్లు", tab_oil: "చమురు & ఇంధనం", tab_security: "భద్రత",
   cat_tech: "టెక్ & AI", cat_india: "భారత రాజకీయాలు", cat_world: "ప్రపంచ రాజకీయాలు", cat_markets: "స్టాక్ మార్కెట్లు", cat_oil: "చమురు & ఇంధనం", cat_security: "ఉగ్రవాదం & భద్రత",
   title_a: "నేటి", title_b: "ముఖ్యమైన ఐదు",
@@ -180,6 +184,7 @@ const te = {
 };
 
 const kn = {
+  earlier_cov: "ಹಿಂದಿನ ವರದಿಗಳು", earlier_hint: "ಯಾವುದೇ ವರದಿಯನ್ನು ಒತ್ತಿ, ಅದರ ಕಾರಣ ಮತ್ತು ಹಿನ್ನೆಲೆಯೊಂದಿಗೆ ಡಿಕೋಡ್ ಆಗಿ ಓದಿ.",
   tab_tech: "ಟೆಕ್ & AI", tab_india: "ಭಾರತ", tab_world: "ಜಗತ್ತು", tab_markets: "ಮಾರುಕಟ್ಟೆ", tab_oil: "ತೈಲ & ಇಂಧನ", tab_security: "ಭದ್ರತೆ",
   cat_tech: "ಟೆಕ್ & AI", cat_india: "ಭಾರತೀಯ ರಾಜಕೀಯ", cat_world: "ವಿಶ್ವ ರಾಜಕೀಯ", cat_markets: "ಷೇರು ಮಾರುಕಟ್ಟೆ", cat_oil: "ತೈಲ & ಇಂಧನ", cat_security: "ಭಯೋತ್ಪಾದನೆ & ಭದ್ರತೆ",
   title_a: "ಇಂದಿನ", title_b: "ಪ್ರಮುಖ ಐದು",
@@ -221,6 +226,7 @@ const kn = {
 };
 
 const ml = {
+  earlier_cov: "മുമ്പത്തെ റിപ്പോർട്ടുകൾ", earlier_hint: "ഒരു റിപ്പോർട്ടിൽ തൊട്ട്, അതിന്റെ കാരണവും പശ്ചാത്തലവും സഹിതം ഡീകോഡ് ചെയ്ത് വായിക്കുക.",
   tab_tech: "ടെക് & AI", tab_india: "ഇന്ത്യ", tab_world: "ലോകം", tab_markets: "വിപണി", tab_oil: "എണ്ണ & ഊർജം", tab_security: "സുരക്ഷ",
   cat_tech: "ടെക് & AI", cat_india: "ഇന്ത്യൻ രാഷ്ട്രീയം", cat_world: "ലോക രാഷ്ട്രീയം", cat_markets: "ഓഹരി വിപണി", cat_oil: "എണ്ണ & ഊർജം", cat_security: "ഭീകരത & സുരക്ഷ",
   title_a: "ഇന്നത്തെ", title_b: "പ്രധാന അഞ്ച്",
@@ -262,6 +268,7 @@ const ml = {
 };
 
 const mr = {
+  earlier_cov: "आधीच्या बातम्या", earlier_hint: "कोणत्याही बातमीवर टॅप करा आणि तिचे कारण व पार्श्वभूमीसह डीकोड केलेली बातमी वाचा.",
   tab_tech: "टेक आणि AI", tab_india: "भारत", tab_world: "जग", tab_markets: "बाजार", tab_oil: "तेल आणि ऊर्जा", tab_security: "सुरक्षा",
   cat_tech: "टेक आणि AI", cat_india: "भारतीय राजकारण", cat_world: "जागतिक राजकारण", cat_markets: "शेअर बाजार", cat_oil: "तेल आणि ऊर्जा", cat_security: "दहशतवाद आणि सुरक्षा",
   title_a: "आजच्या", title_b: "पाच मोठ्या बातम्या",
@@ -303,6 +310,7 @@ const mr = {
 };
 
 const bn = {
+  earlier_cov: "আগের খবর", earlier_hint: "যেকোনো প্রতিবেদনে ট্যাপ করে তার কারণ ও পটভূমিসহ ডিকোড করা খবর পড়ুন।",
   tab_tech: "প্রযুক্তি ও AI", tab_india: "ভারত", tab_world: "বিশ্ব", tab_markets: "বাজার", tab_oil: "তেল ও জ্বালানি", tab_security: "নিরাপত্তা",
   cat_tech: "প্রযুক্তি ও AI", cat_india: "ভারতের রাজনীতি", cat_world: "বিশ্ব রাজনীতি", cat_markets: "শেয়ার বাজার", cat_oil: "তেল ও জ্বালানি", cat_security: "সন্ত্রাস ও নিরাপত্তা",
   title_a: "আজকের", title_b: "সেরা পাঁচ",
@@ -344,6 +352,7 @@ const bn = {
 };
 
 const gu = {
+  earlier_cov: "અગાઉના સમાચાર", earlier_hint: "કોઈપણ અહેવાલ પર ટૅપ કરો અને તેના કારણ અને પૃષ્ઠભૂમિ સાથે ડીકોડ કરેલો વાંચો.",
   tab_tech: "ટેક અને AI", tab_india: "ભારત", tab_world: "વિશ્વ", tab_markets: "બજાર", tab_oil: "તેલ અને ઊર્જા", tab_security: "સુરક્ષા",
   cat_tech: "ટેક અને AI", cat_india: "ભારતીય રાજકારણ", cat_world: "વિશ્વ રાજકારણ", cat_markets: "શેરબજાર", cat_oil: "તેલ અને ઊર્જા", cat_security: "આતંક અને સુરક્ષા",
   title_a: "આજના", title_b: "ટોચના પાંચ સમાચાર",
@@ -385,6 +394,7 @@ const gu = {
 };
 
 const pa = {
+  earlier_cov: "ਪਹਿਲਾਂ ਦੀ ਕਵਰੇਜ", earlier_hint: "ਕਿਸੇ ਵੀ ਰਿਪੋਰਟ ਨੂੰ ਟੈਪ ਕਰੋ ਅਤੇ ਉਸ ਦੇ ਕਾਰਨ ਤੇ ਪਿਛੋਕੜ ਸਮੇਤ ਡੀਕੋਡ ਕਰਕੇ ਪੜ੍ਹੋ।",
   tab_tech: "ਟੈੱਕ ਅਤੇ AI", tab_india: "ਭਾਰਤ", tab_world: "ਦੁਨੀਆ", tab_markets: "ਬਾਜ਼ਾਰ", tab_oil: "ਤੇਲ ਅਤੇ ਊਰਜਾ", tab_security: "ਸੁਰੱਖਿਆ",
   cat_tech: "ਟੈੱਕ ਅਤੇ AI", cat_india: "ਭਾਰਤੀ ਰਾਜਨੀਤੀ", cat_world: "ਵਿਸ਼ਵ ਰਾਜਨੀਤੀ", cat_markets: "ਸ਼ੇਅਰ ਬਾਜ਼ਾਰ", cat_oil: "ਤੇਲ ਅਤੇ ਊਰਜਾ", cat_security: "ਅੱਤਵਾਦ ਅਤੇ ਸੁਰੱਖਿਆ",
   title_a: "ਅੱਜ ਦੀਆਂ", title_b: "ਪੰਜ ਵੱਡੀਆਂ ਖ਼ਬਰਾਂ",
@@ -426,6 +436,7 @@ const pa = {
 };
 
 const or = {
+  earlier_cov: "ପୂର୍ବ ଖବର", earlier_hint: "ଯେକୌଣସି ରିପୋର୍ଟରେ ଟାପ୍ କରି ତାର କାରଣ ଓ ପୃଷ୍ଠଭୂମି ସହ ଡିକୋଡ୍ ହୋଇଥିବା ଖବର ପଢ଼ନ୍ତୁ।",
   tab_tech: "ଟେକ୍ ଓ AI", tab_india: "ଭାରତ", tab_world: "ବିଶ୍ୱ", tab_markets: "ବଜାର", tab_oil: "ତେଲ ଓ ଶକ୍ତି", tab_security: "ସୁରକ୍ଷା",
   cat_tech: "ଟେକ୍ ଓ AI", cat_india: "ଭାରତୀୟ ରାଜନୀତି", cat_world: "ବିଶ୍ୱ ରାଜନୀତି", cat_markets: "ସେୟାର ବଜାର", cat_oil: "ତେଲ ଓ ଶକ୍ତି", cat_security: "ଆତଙ୍କବାଦ ଓ ସୁରକ୍ଷା",
   title_a: "ଆଜିର", title_b: "ମୁଖ୍ୟ ପାଞ୍ଚ",
@@ -467,6 +478,7 @@ const or = {
 };
 
 const ur = {
+  earlier_cov: "پچھلی کوریج", earlier_hint: "کسی رپورٹ پر ٹیپ کریں اور اسے اس کی وجہ اور پس منظر کے ساتھ ڈی کوڈ شدہ پڑھیں۔",
   tab_tech: "ٹیک اور AI", tab_india: "بھارت", tab_world: "دنیا", tab_markets: "مارکیٹ", tab_oil: "تیل اور توانائی", tab_security: "سلامتی",
   cat_tech: "ٹیک اور AI", cat_india: "بھارتی سیاست", cat_world: "عالمی سیاست", cat_markets: "اسٹاک مارکیٹ", cat_oil: "تیل اور توانائی", cat_security: "دہشت گردی اور سلامتی",
   title_a: "آج کی", title_b: "پانچ بڑی خبریں",

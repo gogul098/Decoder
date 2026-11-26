@@ -133,33 +133,57 @@ final class NewsSync {
             nm.createNotificationChannel(ch);
         }
 
-        JSONObject first = fresh.get(0);
-        String title = fresh.size() == 1 ? first.getString("title") : newStories(prefs.getString("lang", "en"), fresh.size());
-        String text = fresh.size() == 1 ? first.optString("label")
-                : first.optString("label") + ": " + first.getString("title");
-
-        Notification.InboxStyle inbox = new Notification.InboxStyle().setSummaryText("Decoded");
-        for (int i = 0; i < Math.min(5, fresh.size()); i++) {
+        // One notification per new story (up to 4), grouped under a summary, so tapping any of
+        // them opens that story decoded in the app. The group rings once.
+        NewsStore.Palette p = NewsStore.palette(c);
+        String lang = prefs.getString("lang", "en");
+        String group = "decoded_news";
+        int shown = Math.min(4, fresh.size());
+        for (int i = 0; i < shown; i++) {
             JSONObject it = fresh.get(i);
-            inbox.addLine(it.optString("label") + " · " + it.getString("title"));
+            String id = it.getString("id");
+            Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse("decoded://s/" + id), c, MainActivity.class);
+            PendingIntent pi = PendingIntent.getActivity(c, id.hashCode(), open,
+                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            Notification.Builder nb = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(c, CHANNEL) : new Notification.Builder(c);
+            nb.setSmallIcon(R.drawable.ic_stat_decoded)
+              .setColor(NewsStore.categoryColor(p, it.optString("category")))
+              .setContentTitle(it.getString("title"))
+              .setContentText(it.optString("label"))
+              .setStyle(new Notification.BigTextStyle().bigText(it.getString("title")))
+              .setSubText(it.optString("label"))
+              .setContentIntent(pi)
+              .setAutoCancel(true)
+              .setWhen(it.optLong("published", System.currentTimeMillis() / 1000) * 1000L)
+              .setShowWhen(true);
+            if (Build.VERSION.SDK_INT >= 24) nb.setGroup(group);
+            if (Build.VERSION.SDK_INT >= 26) nb.setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY);
+            else if (i == 0) nb.setDefaults(Notification.DEFAULT_ALL);
+            nm.notify(6000 + Math.abs(id.hashCode() % 900), nb.build());
         }
 
-        Uri link = Uri.parse(fresh.size() == 1 ? "decoded://s/" + first.getString("id") : "decoded://home");
-        Intent open = new Intent(Intent.ACTION_VIEW, link, c, MainActivity.class);
-        PendingIntent pi = PendingIntent.getActivity(c, 7, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-
-        NewsStore.Palette p = NewsStore.palette(c);
-        Notification.Builder nb = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(c, CHANNEL) : new Notification.Builder(c);
-        nb.setSmallIcon(R.drawable.ic_stat_decoded)
-          .setColor(NewsStore.categoryColor(p, first.optString("category")))
-          .setContentTitle(title)
-          .setContentText(text)
-          .setStyle(fresh.size() > 1 ? inbox : new Notification.BigTextStyle().bigText(text))
-          .setContentIntent(pi)
-          .setAutoCancel(true)
-          .setNumber(fresh.size());
-        if (Build.VERSION.SDK_INT < 26) nb.setDefaults(Notification.DEFAULT_ALL);
-        nm.notify(5150, nb.build());
+        if (Build.VERSION.SDK_INT >= 24) {
+            Notification.InboxStyle inbox = new Notification.InboxStyle().setSummaryText("Decoded");
+            for (int i = 0; i < shown; i++) {
+                JSONObject it = fresh.get(i);
+                inbox.addLine(it.optString("label") + " · " + it.getString("title"));
+            }
+            Intent home = new Intent(Intent.ACTION_VIEW, Uri.parse("decoded://home"), c, MainActivity.class);
+            PendingIntent hp = PendingIntent.getActivity(c, 7, home, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            Notification.Builder sb = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(c, CHANNEL) : new Notification.Builder(c);
+            sb.setSmallIcon(R.drawable.ic_stat_decoded)
+              .setColor(p.colors[0])
+              .setContentTitle(newStories(lang, fresh.size()))
+              .setContentText(fresh.get(0).getString("title"))
+              .setStyle(inbox)
+              .setGroup(group)
+              .setGroupSummary(true)
+              .setContentIntent(hp)
+              .setAutoCancel(true)
+              .setNumber(fresh.size());
+            if (Build.VERSION.SDK_INT < 26) sb.setDefaults(Notification.DEFAULT_ALL);
+            nm.notify(5150, sb.build());
+        }
     }
 
     /** "N new stories" in the reader's language. */

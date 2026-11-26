@@ -57,8 +57,24 @@ async def decode_story(ctx, story_id: str, lang: str = "en") -> str:
         log.exception("decode failed for %s", sk)
         await set_status(r, sk, f"error:{str(e)[:160]}", ttl=60)
         return "error"
-    result.update({"id": story_id, "lang": lang, "model": model, "story": story,
-                   "leads": [{k: l[k] for k in ("title", "source", "url", "published")} for l in leads]})
+    # Every earlier report becomes a story of its own, so the app can open and decode it in place
+    lead_out = []
+    for l in leads:
+        lid = news.story_id(l["title"])
+        lead_story = {"id": lid, "title": l["title"], "summary": l.get("summary", ""), "published": l["published"],
+                      "outlets": 1, "category": story.get("category", ""), "image": l.get("image", ""),
+                      "image_credit": l["source"] if l.get("image") else "",
+                      "sources": [{"name": l["source"], "url": l["url"], "title": l["title"]}]}
+        await r.set(f"story:{lid}", json.dumps(lead_story), ex=7 * 24 * 3600, nx=True)
+        lead_out.append({"id": lid, **{k: l[k] for k in ("title", "source", "url", "published")}})
+    if not story.get("image") and not settings.news_mock:      # a photo for stories opened from earlier coverage
+        try:
+            from .images import add_missing_images
+            if await add_missing_images([story], r):
+                await r.set(f"story:{story_id}", json.dumps(story), ex=7 * 24 * 3600)
+        except Exception:  # noqa: BLE001
+            pass
+    result.update({"id": story_id, "lang": lang, "model": model, "story": story, "leads": lead_out})
     await r.set(f"explain2:{sk}", json.dumps(result), ex=settings.explain_ttl)
     await r.delete(f"explain2:{sk}:status")
     await r.publish(decode_channel(sk), json.dumps({"stage": "ready", "result": result}))

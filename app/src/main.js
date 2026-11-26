@@ -437,7 +437,7 @@ function story(id) {
   const known = Object.values(state.feeds).flatMap((f) => f.stories).find((s) => s.id === id);
   setCat(known?.category || store.get("cat", "tech"));
   view.innerHTML = `
-    <div class="story-top"><a class="back" href="#/c/${store.get("cat", "tech")}">${esc(t("back_top"))}</a></div>
+    <div class="story-top"><a class="back" href="#/c/${store.get("cat", "tech")}">${esc(trail.length ? t("back") : t("back_top"))}</a></div>
     <article class="paper box">
       <header class="masthead">${known ? `${kicker(known)}${clip(known, true)}<h1 dir="auto">${esc(tr(known))}</h1>` : `<h1>${esc(t("decoding"))}</h1>`}</header>
       <div class="inner">
@@ -506,14 +506,12 @@ function renderStory(d) {
   const s = d.story || {};
   setCat(s.category);
   const qa = [[t("q_what"), d.what_changed], [t("q_why"), d.why], [t("q_how"), d.how], [t("q_when"), d.when]].filter(([, v]) => v);
-  const sources = [
-    ...(s.sources || []).map((x) => ({ name: x.name, title: x.title, url: x.url })),
-    ...(d.leads || []).map((x) => ({ name: x.source, title: x.title, url: x.url, earlier: true })),
-  ];
+  const sources = (s.sources || []).map((x) => ({ name: x.name, title: x.title, url: x.url }));
+  const leads = (d.leads || []).filter((l) => l.id).sort((a, b) => b.published - a.published);
   let k = 0;
   const sec = (t) => `<h2 class="sec" style="${col(++k)}">${t}</h2>`;
   view.innerHTML = `
-    <div class="story-top"><a class="back" href="#/c/${store.get("cat", "tech")}">${esc(t("back_top"))}</a>
+    <div class="story-top"><a class="back" href="#/c/${store.get("cat", "tech")}">${esc(trail.length ? t("back") : t("back_top"))}</a>
       <button class="btn" id="listen">${icon.play}${esc(t("listen"))}</button></div>
     <article class="paper box">
       <header class="masthead" style="--c:var(${CAT_COLOR[s.category] || "--yellow"})">${kicker(s)}${clip(s, true)}<h1 dir="auto">${esc(d.headline || tr(s))}</h1></header>
@@ -536,6 +534,12 @@ function renderStory(d) {
       ${d.narrative?.length ? `${sec(t("full"))}<div class="narrative">${d.narrative.map((p) => `<p>${esc(p)}</p>`).join("")}</div>` : ""}
       ${d.watch_next ? `${sec(t("watch"))}<p class="watch">${esc(d.watch_next)}</p>` : ""}
       ${d.confidence_note ? `<p class="note">${esc(d.confidence_note)}</p>` : ""}
+      ${leads.length ? `${sec(t("earlier_cov"))}<p class="note" style="margin:-4px 0 10px">${esc(t("earlier_hint"))}</p>
+        <div class="leads">${leads.map((l, i) => `
+          <a class="lead" href="#/s/${l.id}" data-id="${l.id}" data-c="${RANK_COLOR[(i + 1) % 5]}" style="${col(i + 1)}">
+            <span class="when">${esc(new Date(l.published * 1000).toLocaleDateString(locale(), { day: "numeric", month: "short" }))}</span>
+            <span class="lt" dir="auto">${esc(tr(l))}</span>
+            <span class="ls">${esc(l.source)}</span><i class="go" aria-hidden="true">→</i></a>`).join("")}</div>` : ""}
       ${sec(t("sources"))}
       <div class="sources">${sources.map((x, i) => `<a href="${esc(x.url)}" data-i="${i}"><b>${esc(x.name)}</b>${x.earlier ? " · " + esc(t("earlier_src")) : ""} — ${esc(x.title)}</a>`).join("")}</div>
       <p class="fine">${esc(t("ai_note", { model: d.model }))}</p>
@@ -547,6 +551,22 @@ function renderStory(d) {
     d.lessons?.length && t("learn") + ". " + d.lessons.map((l) => l.lesson).join(" "),
     ...(d.narrative || [])].filter(Boolean).join("\n\n");
   hideBrokenClips(view);
+  // earlier reports open inside the app (page flips forward; Back returns to this story)
+  view.querySelectorAll(".lead").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    trail.push(current.id);
+    nextTurn = { color: a.dataset.c, label: "↺" };
+    location.hash = `#/s/${a.dataset.id}`;
+  }));
+  if (getLang() !== "en" && leads.some((l) => !titleCache[getLang()]?.[l.id])) {
+    translateTitles(leads).then((changed) => {
+      if (!changed || current.id !== d.id) return;
+      view.querySelectorAll(".lead").forEach((a) => {
+        const l = leads.find((x) => x.id === a.dataset.id);
+        if (l) a.querySelector(".lt").textContent = tr(l);
+      });
+    });
+  }
   const lb = view.querySelector("#listen");
   lb.addEventListener("click", () => speak(script, lb));
   view.querySelectorAll(".sources a").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); openExternal(sources[+a.dataset.i].url); }));
@@ -824,6 +844,22 @@ function splash() {
   });
 }
 
+// ---------------- back navigation ----------------
+// Story → earlier story → … : Back walks back through the stories you opened, then to the list.
+const trail = [];
+let goingBack = false;
+function goBack() {
+  goingBack = true;
+  if (current.name === "story" && trail.length) location.hash = `#/s/${trail.pop()}`;
+  else location.hash = `#/c/${store.get("cat", "tech")}`;
+}
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("a.back");
+  if (!a) return;
+  e.preventDefault();
+  goBack();
+});
+
 // ---------------- router ----------------
 function route() {
   const prev = current.name;
@@ -832,13 +868,16 @@ function route() {
   const go = h[0] === "s" && h[1] ? () => { story(h[1]); window.scrollTo(0, 0); }
     : h[0] === "settings" ? () => { settingsView(); window.scrollTo(0, 0); }
     : () => { home(h[0] === "c" ? h[1] : undefined); window.scrollTo(0, scrollMemo.home || 0); };
-  const forward = (h[0] === "s" || h[0] === "settings") && prev === "home";
-  const backward = prev && prev !== "home" && !(h[0] === "s" || h[0] === "settings");
+  const isPage = h[0] === "s" || h[0] === "settings";
+  const backward = goingBack || (prev && prev !== "home" && !isPage);
+  const forward = !backward && isPage && (prev === "home" || (prev === "story" && h[0] === "s" && h[1] !== current.id));
+  goingBack = false;
+  if (!isPage) trail.length = 0;
   if (forward) turnPage("fwd", go);
   else if (backward) {
     if (decodeSrc) decodeSrc.close();
     stopSpeech();
-    nextTurn = { color: CAT_COLOR[store.get("cat", "tech")], label: "5" };
+    nextTurn = nextTurn.color ? nextTurn : { color: CAT_COLOR[store.get("cat", "tech")], label: isPage ? "↺" : "5" };
     turnPage("back", go);
   }
   else go();
@@ -867,14 +906,14 @@ setupSwipe();
 // decoded://s/<id> from the widget or a notification opens that story
 function openLink(url) {
   const m = /^decoded:\/\/s\/([\w-]+)/.exec(url || "");
-  if (m) location.hash = `#/s/${m[1]}`;
+  if (m) { if (current.name === "story") trail.push(current.id); location.hash = `#/s/${m[1]}`; }
   else if (/^decoded:\/\//.test(url || "") && current.name !== "home") location.hash = `#/c/${store.get("cat", "tech")}`;
 }
 
 if (isNative) {
   import("@capacitor/app").then(({ App }) => {
     App.addListener("backButton", () => {
-      if (current.name === "home") App.exitApp(); else location.hash = `#/c/${store.get("cat", "tech")}`;
+      if (current.name === "home") App.exitApp(); else goBack();
     });
     App.addListener("resume", () => { if (!es || es.readyState === 2) connectLive(); backgroundChecks(); });
     App.addListener("appUrlOpen", ({ url }) => openLink(url));
