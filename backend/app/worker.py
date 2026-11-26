@@ -14,11 +14,11 @@ from arq import cron, func
 from arq.connections import RedisSettings
 
 from . import news
-from .balancer import Balancer
+from .balancer import Balancer, LLMError
 from .config import settings
 from .explain import build_messages, validate
 from .langs import norm, story_key
-from .store import decode_channel, get_json, ingest, redis_client, set_status
+from .store import allow_images, decode_channel, get_json, ingest, redis_client, set_status
 
 log = logging.getLogger("worker")
 
@@ -53,25 +53,32 @@ async def decode_story(ctx, story_id: str, lang: str = "en") -> str:
         await set_status(r, sk, "writing", leads=len(leads))
         raw, model = await ctx["bal"].chat_json(build_messages(story, leads, lang), min_weight=3 if lang != "en" else 0)
         result = validate(raw)
-    except Exception as e:  # noqa: BLE001 — any failure becomes a readable status
+    except LLMError as e:          # every model busy or out of quota: friendly, retryable
+        log.warning("decode busy for %s: %s", sk, e)
+        await set_status(r, sk, "error:busy: Decoding is busy right now. Try again in a few minutes.", ttl=30)
+        return "busy"
+    except Exception as e:  # noqa: BLE001 — any other failure becomes a readable status
         log.exception("decode failed for %s", sk)
-        await set_status(r, sk, f"error:{str(e)[:160]}", ttl=60)
+        await set_status(r, sk, "error:Couldn't decode this story right now.", ttl=60)
         return "error"
     # Every earlier report becomes a story of its own, so the app can open and decode it in place
     lead_out = []
     for l in leads:
         lid = news.story_id(l["title"])
         lead_story = {"id": lid, "title": l["title"], "summary": l.get("summary", ""), "published": l["published"],
-                      "outlets": 1, "category": story.get("category", ""), "image": l.get("image", ""),
+                      "outlets": 1, "category": story.get("category", ""),
+                      "image": (l.get("image") or "").replace("http://", "https://", 1),
                       "image_credit": l["source"] if l.get("image") else "",
                       "sources": [{"name": l["source"], "url": l["url"], "title": l["title"]}]}
         await r.set(f"story:{lid}", json.dumps(lead_story), ex=7 * 24 * 3600, nx=True)
+        await allow_images(r, [lead_story])
         lead_out.append({"id": lid, **{k: l[k] for k in ("title", "source", "url", "published")}})
     if not story.get("image") and not settings.news_mock:      # a photo for stories opened from earlier coverage
         try:
             from .images import add_missing_images
             if await add_missing_images([story], r):
                 await r.set(f"story:{story_id}", json.dumps(story), ex=7 * 24 * 3600)
+                await allow_images(r, [story])
         except Exception:  # noqa: BLE001
             pass
     result.update({"id": story_id, "lang": lang, "model": model, "story": story, "leads": lead_out})

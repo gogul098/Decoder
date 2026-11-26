@@ -58,7 +58,7 @@ final class NewsStore {
             }
         }
         while (api.endsWith("/")) api = api.substring(0, api.length() - 1);
-        return api;
+        return api.startsWith("https://") ? api : "";   // HTTPS servers only
     }
 
     // ---------- the same colour themes as the app ----------

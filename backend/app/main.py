@@ -10,8 +10,12 @@ import asyncio
 import contextlib
 import json
 import logging
+import ipaddress
+import re
 import time
 from collections import defaultdict
+
+import httpx
 from contextlib import asynccontextmanager
 
 from arq import create_pool
@@ -24,6 +28,7 @@ from . import news
 from .balancer import Balancer
 from .config import settings
 from .langs import LABELS, norm, story_key
+from .netsafe import ip_is_public, safe_get
 from .store import NEWS_CHANNEL, archive_key, decode_channel, get_json, redis_client, snapshot
 
 log = logging.getLogger("api")
@@ -116,8 +121,28 @@ async def lifespan(app: FastAPI):
     await app.state.r.aclose()
 
 
-app = FastAPI(title="News Decoded API", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+# No public API docs in production (they list every endpoint for an attacker)
+app = FastAPI(title="News Decoded API", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+# Browsers may only call the API from the app itself (Capacitor serves it from https://localhost).
+# The native widget/alerts don't use CORS. Add origins with CORS_ORIGINS for local web testing.
+app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["GET"],
+                   allow_headers=["Accept", "Cache-Control", "Last-Event-ID"], allow_credentials=False)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return resp
+
+
+def _debug_allowed(request: Request) -> bool:
+    import hmac
+    token = request.headers.get("x-debug-token") or request.query_params.get("token", "")
+    return bool(settings.debug_token) and hmac.compare_digest(token, settings.debug_token)
 
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
 
@@ -126,11 +151,72 @@ def sse(event: str, data) -> str:
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
 
 
+STORY_ID = re.compile(r"^[0-9a-f]{12}$")
+
+
+def client_ip(request: Request) -> str:
+    """The caller's real IP, for rate limits and spend caps.
+
+    Render always sits behind Cloudflare, which overwrites True-Client-IP / CF-Connecting-IP with the
+    address it saw, so those can't be faked (our nginx clears them for self-hosted setups). Otherwise,
+    proxies APPEND to X-Forwarded-For: walk it from the right and take the first public address, so
+    entries a caller wrote themselves (on the left) are never used, and Render's internal hops are skipped.
+    """
+    for h in ("true-client-ip", "cf-connecting-ip"):
+        v = request.headers.get(h, "").strip()
+        if _is_ip(v):
+            return v
+    fwd = [x.strip() for x in request.headers.get("x-forwarded-for", "").split(",") if x.strip()]
+    for v in reversed(fwd):
+        if _is_ip(v) and ip_is_public(ipaddress.ip_address(v)):
+            return v
+    if fwd and _is_ip(fwd[-1]):
+        return fwd[-1]
+    return request.client.host if request.client else "?"
+
+
+def _is_ip(v: str) -> bool:
+    try:
+        ipaddress.ip_address(v)
+        return True
+    except ValueError:
+        return False
+
+
+def _day() -> str:
+    return time.strftime("%Y%m%d", time.gmtime())
+
+
+async def _spend_ok(r, ip: str) -> bool:
+    """One more new (paid) decode allowed for this IP and for everyone today?"""
+    day = _day()
+    pipe = r.pipeline()
+    pipe.incr(f"cap:dec:ip:{ip}:{day}"); pipe.expire(f"cap:dec:ip:{ip}:{day}", 90000)
+    pipe.incr(f"cap:dec:all:{day}"); pipe.expire(f"cap:dec:all:{day}", 90000)
+    mine, _, total, _ = await pipe.execute()
+    return mine <= settings.decode_per_ip_day and total <= settings.decode_daily_cap
+
+
+open_streams: dict[str, int] = defaultdict(int)
+
+
+@contextlib.contextmanager
+def stream_slot(ip: str):
+    if open_streams[ip] >= settings.streams_per_ip:
+        raise HTTPException(429, "Too many open connections")
+    open_streams[ip] += 1
+    try:
+        yield
+    finally:
+        open_streams[ip] -= 1
+        if open_streams[ip] <= 0:
+            open_streams.pop(ip, None)
+
+
 @app.middleware("http")
 async def per_client_limit(request: Request, call_next):
     if request.url.path.startswith("/api/") and request.url.path != "/api/health":
-        fwd = request.headers.get("x-forwarded-for", "").split(",")[0].strip()   # behind Render / proxies
-        ip = request.headers.get("x-real-ip") or fwd or (request.client.host if request.client else "?")
+        ip = client_ip(request)
         key = f"rl:{ip}:{int(time.time() // 60)}"
         r = request.app.state.r
         n = await r.incr(key)
@@ -151,9 +237,12 @@ async def stream(request: Request):
     """Open once when the app starts. Sends every category's current top 5 straight from
     Redis, then pushes each update the ingester publishes. Never touches RSS."""
     r, hub = request.app.state.r, request.app.state.hub
+    ip = client_ip(request)
+    if open_streams[ip] >= settings.streams_per_ip:
+        raise HTTPException(429, "Too many open connections")
 
     async def gen():
-        with hub.listen(NEWS_CHANNEL) as q:
+        with stream_slot(ip), hub.listen(NEWS_CHANNEL) as q:
             yield "retry: 3000\n\n"
             empty = stale = False
             for cat in news.CATEGORIES:
@@ -177,20 +266,32 @@ async def stream(request: Request):
     return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
+BUSY = "busy: Decoding is busy right now. Try again in a few minutes."
+
+
+def _err(message: str) -> dict:
+    busy = message.startswith("busy")
+    return {"stage": "error", "code": "busy" if busy else "", "message": message.split(":", 1)[1].strip() if busy else message}
+
+
 async def _ensure_queued(request: Request, story_id: str, lang: str = "en") -> dict:
     """Return the current decode state, queueing the job if nobody has yet."""
     r = request.app.state.r
+    if not STORY_ID.match(story_id):
+        return _err("Story not found. Pull down to refresh.")
     sk = story_key(story_id, lang)
     done = await get_json(r, f"explain2:{sk}")
     if done:
         return {"stage": "ready", "result": done}
     if not await r.exists(f"story:{story_id}"):
-        return {"stage": "error", "message": "Story not found. Pull down to refresh."}
+        return _err("Story not found. Pull down to refresh.")
     status = await r.get(f"explain2:{sk}:status")
     if status and status.startswith("error:"):
         await r.delete(f"explain2:{sk}:status")       # the next open retries
-        return {"stage": "error", "message": status[6:]}
+        return _err(status[6:])
     if not status:
+        if not await _spend_ok(r, client_ip(request)):      # daily spend guard (per phone and overall)
+            return _err(BUSY)
         await r.set(f"explain2:{sk}:status", "queued", ex=600)
         await request.app.state.q.enqueue_job("decode_story", story_id, lang, _job_id=f"decode:{sk}")
         status = "queued"
@@ -201,10 +302,13 @@ async def _ensure_queued(request: Request, story_id: str, lang: str = "en") -> d
 async def decode_stream(story_id: str, request: Request, lang: str = "en"):
     """Live progress of one story: queued -> finding -> writing -> ready (with the result)."""
     hub = request.app.state.hub
+    ip = client_ip(request)
+    if open_streams[ip] >= settings.streams_per_ip:
+        raise HTTPException(429, "Too many open connections")
 
     async def gen():
         lg = norm(lang)
-        with hub.listen(decode_channel(story_key(story_id, lg))) as q:   # subscribe BEFORE checking, so nothing is missed
+        with stream_slot(ip), hub.listen(decode_channel(story_key(story_id, lg))) as q:   # subscribe BEFORE checking, so nothing is missed
             state = await _ensure_queued(request, story_id, lg)
             yield sse("ready" if state["stage"] == "ready" else "error" if state["stage"] == "error" else "progress", state)
             if state["stage"] in ("ready", "error"):
@@ -221,7 +325,7 @@ async def decode_stream(story_id: str, request: Request, lang: str = "en"):
                     yield sse("ready", msg)
                     return
                 if stage.startswith("error:"):
-                    yield sse("error", {"stage": "error", "message": stage[6:]})
+                    yield sse("error", _err(stage[6:]))
                     return
                 yield sse("progress", msg)
             yield sse("error", {"stage": "error", "message": "Taking too long. Try again."})
@@ -284,29 +388,36 @@ async def digest(request: Request, per: int = 2, lang: str = "en"):
 
 @app.get("/api/img")
 async def image_proxy(u: str, request: Request):
-    """Fallback for news photos that a site refuses to show inside apps (hotlink protection):
-    the server fetches the picture the way a browser on that site would and passes it on."""
+    """Fallback for news photos that a site refuses to show inside apps (hotlink protection).
+    Only proxies photos the server itself attached to a story (so it is not an open proxy),
+    and fetches them through the SSRF-safe client. Every failure looks the same (404)."""
     from urllib.parse import urlparse
     from fastapi.responses import Response
-    p = urlparse(u)
-    host = (p.hostname or "").lower()
-    if p.scheme not in ("http", "https") or "." not in host or host.endswith((".internal", ".local", "localhost")) \
-            or host.replace(".", "").isdigit() or ":" in host:
+    from .netsafe import ip_is_public, Blocked, safe_get
+    from .store import image_allowed
+    if len(u) > 2000 or urlparse(u).scheme not in ("http", "https"):
         raise HTTPException(400, "bad image url")
+    if not await image_allowed(request.app.state.r, u):
+        raise HTTPException(404, "image unavailable")
+    p = urlparse(u)
     try:
-        r = await request.app.state.bal.http.get(u, timeout=10, follow_redirects=True, headers={
-            "User-Agent": news.UA, "Referer": f"{p.scheme}://{p.netloc}/", "Accept": "image/avif,image/webp,image/*,*/*;q=0.8"})
-    except Exception:  # noqa: BLE001
-        raise HTTPException(502, "image fetch failed")
-    ctype = r.headers.get("content-type", "")
-    if r.status_code >= 400 or not ctype.startswith("image/") or len(r.content) > 6_000_000:
-        raise HTTPException(404, "not an image")
-    return Response(r.content, media_type=ctype, headers={"Cache-Control": "public, max-age=86400"})
+        status, headers, body = await safe_get(request.app.state.bal.http, u, max_bytes=5_000_000, headers={
+            "User-Agent": news.UA, "Referer": f"{p.scheme}://{p.netloc}/", "Accept": "image/avif,image/webp,image/*;q=0.8"})
+    except (Blocked, httpx.HTTPError, OSError):
+        raise HTTPException(404, "image unavailable")
+    ctype = headers.get("content-type", "").split(";")[0].strip().lower()
+    if status >= 400 or ctype not in ("image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"):
+        raise HTTPException(404, "image unavailable")
+    return Response(body, media_type=ctype, headers={"Cache-Control": "public, max-age=86400",
+                                                      "X-Content-Type-Options": "nosniff"})
 
 
 @app.get("/api/debug")
 async def debug(request: Request):
-    """Is the server reaching the RSS feeds, and is the ingester publishing to Redis?"""
+    """Is the server reaching the RSS feeds, and is the ingester publishing to Redis?
+    Needs DEBUG_TOKEN (set it in Render → Environment) as ?token= or the X-Debug-Token header."""
+    if not _debug_allowed(request):
+        raise HTTPException(404, "Not Found")
     r = request.app.state.r
     out = {"now": time.time(), "embedded_worker": settings.embedded_worker,
            "queue_length": await r.zcard("arq:queue"),
@@ -344,7 +455,7 @@ async def translated_titles(request: Request, lang: str = "en", ids: str = ""):
     from .translate import titles
     r = request.app.state.r
     items = []
-    for sid in [x for x in ids.split(",") if x][:60]:
+    for sid in [x for x in ids.split(",") if STORY_ID.match(x)][:60]:
         s = await get_json(r, f"story:{sid}")
         if s:
             items.append({"id": sid, "title": s["title"]})
@@ -353,7 +464,11 @@ async def translated_titles(request: Request, lang: str = "en", ids: str = ""):
 
 @app.get("/api/health")
 async def health(request: Request):
-    hub = request.app.state.hub
-    return {"ok": True, "queue": await request.app.state.r.zcard("arq:queue"),
-            "sse_listeners": sum(len(v) for v in hub.subs.values()),
-            "lanes": await request.app.state.bal.status()}
+    """Liveness for Render. Internal details only with the debug token."""
+    out = {"ok": True}
+    if _debug_allowed(request):
+        hub = request.app.state.hub
+        out.update(queue=await request.app.state.r.zcard("arq:queue"),
+                   sse_listeners=sum(len(v) for v in hub.subs.values()),
+                   lanes=await request.app.state.bal.status())
+    return out

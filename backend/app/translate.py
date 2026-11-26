@@ -22,8 +22,15 @@ async def titles(r, bal: Balancer, lang: str, items: list[dict]) -> dict[str, st
             out[item["id"]] = hit
         else:
             todo.append(item)
+    import time as _t
+    day = _t.strftime("%Y%m%d", _t.gmtime())
     for start in range(0, len(todo), 20):
         batch = todo[start:start + 20]
+        n = await r.incr(f"cap:tr:{day}")
+        await r.expire(f"cap:tr:{day}", 90000)
+        if n > settings.translate_daily_cap:           # daily guard: show English instead of spending more
+            out.update({i["id"]: i["title"] for i in batch})
+            continue
         try:
             if settings.llm_mock:
                 got = {i["id"]: f"[{lang}] {i['title']}" for i in batch}

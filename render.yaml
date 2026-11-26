@@ -31,4 +31,6 @@ services:
         sync: false
       - key: REDIS_URL
         sync: false
+      - key: DEBUG_TOKEN          # unlocks /api/debug?token=…; Render makes a random one
+        generateValue: true
 

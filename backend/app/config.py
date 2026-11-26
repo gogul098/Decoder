@@ -11,12 +11,13 @@ def _list(name: str, default: str) -> list[str]:
 # several models multiplies throughput. Each entry: model_id:requests_per_minute:weight
 # Weight = preference (higher = picked more often, e.g. better writers).
 DEFAULT_MODELS = (
+    # llama-3.3-70b-versatile and llama-3.1-8b-instant were shut down by Groq on 2026-08-16.
+    # Models Groq no longer serves are dropped at start-up by Balancer.discover().
     "openai/gpt-oss-120b:30:5,"
-    "llama-3.3-70b-versatile:30:4,"
-    "qwen/qwen3-32b:60:3,"
+    "qwen/qwen3.8-27b:30:4,"
     "openai/gpt-oss-20b:30:3,"
-    "meta-llama/llama-4-scout-17b-16e-instruct:30:2,"
-    "llama-3.1-8b-instant:30:1"
+    "qwen/qwen3-32b:60:3,"
+    "meta-llama/llama-4-scout-17b-16e-instruct:30:2"
 )
 
 
@@ -51,6 +52,14 @@ class Settings:
     prewarm: bool = os.getenv("PREWARM", "0") == "1"            # decode top stories before anyone opens them
     worker_concurrency: int = int(os.getenv("WORKER_CONCURRENCY", "8"))
     client_rpm: int = int(os.getenv("CLIENT_RPM", "60"))        # per-IP API limit
+    # Spend guards for the paid model calls (an attacker must not be able to drain the daily quota)
+    decode_per_ip_day: int = int(os.getenv("DECODE_PER_IP_DAY", "80"))     # new decodes one phone/IP may start per day
+    decode_daily_cap: int = int(os.getenv("DECODE_DAILY_CAP", "400"))      # new decodes for everyone per day
+    translate_daily_cap: int = int(os.getenv("TRANSLATE_DAILY_CAP", "600"))  # headline-translation batches per day
+    streams_per_ip: int = int(os.getenv("STREAMS_PER_IP", "8"))            # open live streams per IP
+    debug_token: str = os.getenv("DEBUG_TOKEN", "")                         # empty = /api/debug disabled
+    cors_origins: list[str] = field(default_factory=lambda: _list(
+        "CORS_ORIGINS", "https://localhost,http://localhost,capacitor://localhost"))
     region: str = os.getenv("NEWS_REGION", "IN")                 # Google News edition
     # Run the queue worker inside the API process (one-service hosting such as Render Free)
     embedded_worker: bool = os.getenv("EMBEDDED_WORKER", "0") == "1"

@@ -21,7 +21,6 @@ jobs:
     env:
       BUILD: ${{ github.run_number }}
       VERSION: 1.0.${{ github.run_number }}
-      HAS_KEYSTORE: ${{ secrets.KEYSTORE_B64 != '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -37,11 +36,17 @@ jobs:
           VITE_VERSION: ${{ env.VERSION }}
           VITE_REPO: ${{ github.repository }}
       - run: npx cap sync android
-      # Optional: sign with your own private key stored in secrets (base64 keystore + passwords).
-      - name: Use signing key from secrets
-        if: env.HAS_KEYSTORE == 'true'
-        env: { KEYSTORE_B64: "${{ secrets.KEYSTORE_B64 }}" }
-        run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore" && echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+      # The release signing key comes only from repository secrets (see README → Signing).
+      - name: Load signing key from secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::Signing key missing. Add the KEYSTORE_B64, KEYSTORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD repository secrets (README → Signing)."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
       - run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon -PversionCode=$BUILD -PversionName=$VERSION 2>&1 | tee ../gradle.log
         working-directory: app/android
         env:

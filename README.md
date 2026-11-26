@@ -48,7 +48,8 @@ colour-printed back before tossing it away.
 - **Multi-model balancer** (`backend/app/balancer.py`). Groq's limits are *per model*, so each model is its
   own lane with a requests-per-minute budget, counted atomically in Redis and shared by all workers.
   The best lane is picked by `weight × spare capacity × health ÷ in-flight`. On a 429 the lane cools down
-  for Groq's `retry-after` and the job moves to the next model. Retired models are dropped automatically.
+  for Groq's `retry-after` and the job moves to the next model. Lanes also rest before Groq would refuse
+  them, using the remaining-requests and remaining-tokens headers. Retired models are dropped automatically.
 - **nginx** spreads traffic over the API replicas, keeps SSE streams unbuffered, and rate-limits abusive IPs.
 
 Tested here with sample news and a stand-in LLM: 300 readers opening 20 stories at once over SSE →
@@ -112,10 +113,10 @@ for 20 seconds, then switch over and show "Switched to the new server". An addre
 Settings always wins; **Use default server** goes back to the published one.
 
 **Signing.** Android only installs an update over an existing app if both APKs are signed with the same
-key, so every build is signed with `app/android/app/decoded.keystore`. Because this repo is public, anyone
-could use that key. For a private key, create your own keystore and add the repository secrets
-`KEYSTORE_B64` (the keystore file, base64-encoded), `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`.
-The workflow then signs with it instead. Switching keys means everyone reinstalls once.
+key. The key is never stored in this repo. The workflow reads it from four repository secrets
+(Settings → Secrets and variables → Actions → **Secrets**): `KEYSTORE_B64` (the keystore file,
+base64-encoded), `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`. Without them the build stops with
+a clear message. Keep a private backup of the keystore: losing it means everyone reinstalls once.
 
 ## Local development
 
@@ -125,7 +126,9 @@ cd backend && pip install -r requirements-dev.txt && pytest
 redis-server &  NEWS_MOCK=1 LLM_MOCK=1 GROQ_API_KEYS=x arq app.worker.WorkerSettings &
 NEWS_MOCK=1 LLM_MOCK=1 GROQ_API_KEYS=x uvicorn app.main:app --port 8000
 # app
-cd app && npm install && npm run dev      # then set the server to http://localhost:8000 in ⚙
+cd app && npm install && VITE_API_BASE=http://localhost:8000 npm run dev
+# the API only answers browsers from CORS_ORIGINS, so add the dev page, e.g.
+# CORS_ORIGINS=http://localhost:5173 when starting uvicorn
 ```
 
 ## Settings (backend `.env`)
@@ -133,13 +136,28 @@ cd app && npm install && npm run dev      # then set the server to http://localh
 | Variable | Default | What it does |
 |---|---|---|
 | `GROQ_API_KEYS` | none | One or more keys, comma separated |
-| `GROQ_MODELS` | 6 models | `model:rpm:weight` list, one lane per model per key |
+| `GROQ_MODELS` | 5 models (gpt-oss-120b, qwen3.8-27b, gpt-oss-20b, qwen3-32b, llama-4-scout) | `model:rpm:weight` list, one lane per model per key |
 | `NEWS_REGION` | `IN` | Google News edition |
 | `FEED_TTL_SECONDS` | `900` | How often the ingester pulls RSS and publishes to Redis |
 | `PREWARM` | `0` | `1` = decode every top story before anyone opens it (instant, but uses more Groq quota) |
 | `WORKER_CONCURRENCY` | `8` | Jobs per worker process |
 | `CLIENT_RPM` | `60` | Requests per minute allowed per phone/IP |
 | `EMBEDDED_WORKER` | `0` | `1` = run the queue worker inside the API process (used on Render Free) |
+| `DECODE_PER_IP_DAY` | `80` | New decodes one IP can start per day (already-decoded stories are free) |
+| `DECODE_DAILY_CAP` | `400` | New decodes for everyone per day, so Groq's daily token budget is never used up |
+| `TRANSLATE_DAILY_CAP` | `600` | Translation batches per day; past it, stories stay in English |
+| `STREAMS_PER_IP` | `8` | Live streams one IP can hold open |
+| `CORS_ORIGINS` | the app's own origins | Web pages allowed to call the API |
+| `DEBUG_TOKEN` | none | Unlocks `/api/debug` and the detailed `/api/health` (`?token=…` or `X-Debug-Token`) |
+
+## Security
+
+- `/api/img` only relays images the server itself attached to a story, checks every address and redirect
+  against private and internal networks, and only returns real image types.
+- Rate limits use the address Render's proxy saw, so a faked `X-Forwarded-For` header doesn't help.
+- Groq spend is capped per IP and per day; when a cap is hit the app says "Decoding is busy".
+- The app only talks HTTPS, only opens web links in the browser, and only installs APKs from this repo's
+  releases.
 
 News comes from Google News RSS (headlines and short snippets only). The AI writes only from those
 headlines, so the app shows every source and says when something is unclear.

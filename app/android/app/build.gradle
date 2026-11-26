@@ -17,23 +17,26 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    // One fixed signing key for every build. Android only installs an update over an
-    // installed app when both are signed with the same key. CI can override it with
-    // the KEYSTORE_* secrets; otherwise the key in this folder is used.
+    // One fixed PRIVATE signing key for every build, so updates install over the existing app.
+    // The key lives only in GitHub secrets (never in this repo); CI writes it to a temp file
+    // and passes its path and passwords through environment variables.
     signingConfigs {
         shared {
-            storeFile file(System.getenv("KEYSTORE_FILE") ?: "decoded.keystore")
-            storePassword System.getenv("KEYSTORE_PASSWORD") ?: "decodedapp"
-            keyAlias System.getenv("KEY_ALIAS") ?: "decoded"
-            keyPassword System.getenv("KEY_PASSWORD") ?: "decodedapp"
+            def ks = System.getenv("KEYSTORE_FILE")
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv("KEYSTORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS")
+                keyPassword System.getenv("KEY_PASSWORD")
+            }
         }
     }
     buildTypes {
         debug {
-            signingConfig signingConfigs.shared
+            if (System.getenv("KEYSTORE_FILE")) signingConfig signingConfigs.shared
         }
         release {
-            signingConfig signingConfigs.shared
+            if (System.getenv("KEYSTORE_FILE")) signingConfig signingConfigs.shared
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

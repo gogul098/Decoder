@@ -82,8 +82,12 @@ async def test_failover_on_429_and_cooldown():
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_respects_rpm_and_spreads_load():
+async def test_respects_rpm_and_spreads_load(monkeypatch):
     settings.llm_mock = False
+    # start the balancer's clock just after a minute boundary so the test can't straddle one
+    start, pc0 = (time.time() // 60) * 60 + 1, time.perf_counter()
+    import types
+    monkeypatch.setattr(B, "time", types.SimpleNamespace(time=lambda: start + time.perf_counter() - pc0))
     lanes = [B.Lane("k", ModelSpec(f"m{i}", 3, 1)) for i in range(3)]
     bal = _bal(lanes)
     respx.post(f"{settings.groq_base}/chat/completions").mock(
@@ -93,3 +97,46 @@ async def test_respects_rpm_and_spreads_load():
     assert all(used.count(m) == 3 for m in ("m0", "m1", "m2"))  # never above each model's 3 RPM
     with pytest.raises(B.LLMError):
         await bal.chat_json([{"role": "user", "content": "x"}], wait_budget=0.5)
+
+
+def test_reset_header_parsing():
+    assert B._seconds("20", 9) == 20 and B._seconds("7.66s", 9) == 7.66
+    assert B._seconds("2m59.56s", 9) == 179.56 and B._seconds("120ms", 9) == 1.0
+    assert B._seconds(None, 9) == 9 and B._seconds("junk", 9) == 9
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_low_tokens_cool_lane_and_reasoning_fallback():
+    settings.llm_mock = False
+    oss = B.Lane("k", ModelSpec("openai/gpt-oss-20b", 30, 5))
+    other = B.Lane("k", ModelSpec("other", 30, 1))
+    bal = _bal([oss, other])
+    seen = []
+
+    def handler(request):
+        body = __import__("json").loads(request.content)
+        seen.append(body)
+        if body["model"] == "openai/gpt-oss-20b" and "reasoning_effort" in body:
+            return httpx.Response(400, json={"error": "unknown parameter"})
+        return httpx.Response(200, headers={"x-ratelimit-remaining-tokens": "900", "x-ratelimit-reset-tokens": "40s"},
+                              json={"choices": [{"message": {"content": '{"headline":"ok"}'}}]})
+
+    respx.post(f"{settings.groq_base}/chat/completions").mock(side_effect=handler)
+    data, model = await bal.chat_json([{"role": "user", "content": "x"}])
+    assert model == "openai/gpt-oss-20b" and data["headline"] == "ok"
+    assert seen[0].get("reasoning_effort") == "low" and "reasoning_effort" not in seen[1]
+    assert 30 < await bal.r.ttl(oss.k("cool")) <= 40     # only 900 tokens left: lane rests until the reset
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_413_moves_to_next_lane():
+    settings.llm_mock = False
+    a, b = B.Lane("k", ModelSpec("a", 30, 5)), B.Lane("k", ModelSpec("b", 30, 1))
+    bal = _bal([a, b])
+    respx.post(f"{settings.groq_base}/chat/completions").mock(
+        side_effect=lambda req: httpx.Response(413) if __import__("json").loads(req.content)["model"] == "a"
+        else _ok("b"))
+    _, model = await bal.chat_json([{"role": "user", "content": "x"}])
+    assert model == "b" and await bal.r.exists(a.k("cool"))

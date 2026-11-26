@@ -39,23 +39,20 @@ async def _resolve_google(url: str) -> str:
 
 
 async def _og_image(url: str, client: httpx.AsyncClient) -> str:
+    from .netsafe import safe_get
     try:
-        async with client.stream("GET", url, timeout=8, follow_redirects=True, headers={"User-Agent": UA}) as r:
-            if r.status_code >= 400:
-                return ""
-            buf = b""
-            async for chunk in r.aiter_bytes():
-                buf += chunk
-                if b"</head>" in buf or len(buf) > 600_000:
-                    break
+        status, _, buf = await safe_get(client, url, timeout=8, headers={"User-Agent": UA},
+                                        max_bytes=600_000, stop_marker=b"</head>")
+        if status >= 400:
+            return ""
         m = META.search(buf.decode("utf-8", "ignore"))
         if not m:
             return ""
         img = html.unescape(m.group(1) or m.group(2)).strip()
         if img.startswith("//"):
             img = "https:" + img
-        return img if img.startswith(("http://", "https://")) else ""
-    except Exception:  # noqa: BLE001
+        return img if img.startswith(("http://", "https://")) and len(img) < 1500 else ""
+    except Exception:  # noqa: BLE001 — blocked, offline, or bad page: no photo
         return ""
 
 

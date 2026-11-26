@@ -117,7 +117,9 @@ async function getJSON(path) {
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `Server error ${r.status}`);
   return r.json();
 }
+const isWebLink = (u) => /^https?:\/\//i.test(u || "");
 async function openExternal(url) {
+  if (!isWebLink(url)) return;                    // never open javascript:, intent:, file: … from feeds
   if (isNative) { const { Browser } = await import("@capacitor/browser"); await Browser.open({ url }); }
   else window.open(url, "_blank", "noopener");
 }
@@ -263,7 +265,8 @@ async function checkConfig() {
   try {
     const cfg = await httpJSON(`https://raw.githubusercontent.com/${REPO}/main/config/app.json?t=${Date.now()}`);
     const remote = (cfg.api_base || "").trim().replace(/\/+$/, "");
-    if (!remote || remote === store.get("api_remote", "")) return;
+    if (!/^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(remote)) return;     // HTTPS servers only
+    if (remote === store.get("api_remote", "")) return;
     const before = apiBase();
     store.set("api_remote", remote);
     syncNative();
@@ -280,6 +283,7 @@ async function checkUpdate({ manual = false } = {}) {
   if (!isNative && !manual) return null;       // the web preview has nothing to install
   const info = await httpJSON(`https://github.com/${REPO}/releases/download/latest/update.json?t=${Date.now()}`);
   if (!(info.build > BUILD)) return { info, newer: false };
+  if (!String(info.apk_url || "").startsWith(`https://github.com/${REPO}/releases/`)) return { info, newer: false };   // only our own releases
   const snoozed = JSON.parse(store.get("update_snooze", "{}"));
   if (!manual && snoozed.build === info.build && Date.now() - snoozed.at < 12 * 3600e3) return { info, newer: true };
   showUpdate(info);
@@ -469,8 +473,9 @@ function decode(id) {
   if (decodeSrc) decodeSrc.close();
   const mine = id;
   let finished = false;
-  const fail = (msg) => {
+  const fail = (d) => {
     finished = true;
+    const msg = typeof d === "string" ? d : d?.code === "busy" ? t("busy") : t("decode_fail");
     if (current.id !== mine || current.name !== "story") return;
     view.querySelector(".steps")?.remove(); view.querySelector(".lines")?.remove();
     view.querySelector(".inner").insertAdjacentHTML("beforeend",
@@ -481,7 +486,7 @@ function decode(id) {
   src.addEventListener("progress", (e) => { const d = JSON.parse(e.data); if (current.id === mine) setStage(d.stage, d); });
   src.addEventListener("ready", (e) => { finished = true; src.close(); if (current.id === mine && current.name === "story") renderStory(JSON.parse(e.data).result); });
   src.addEventListener("error", (e) => {
-    if (e.data) { src.close(); fail(JSON.parse(e.data).message); return; }
+    if (e.data) { src.close(); let d = {}; try { d = JSON.parse(e.data); } catch {} fail(d); return; }
     if (finished) return;
     src.close();                                      // stream broke: fall back to polling once a second
     poll(mine, fail);
@@ -493,9 +498,9 @@ async function poll(id, fail, tries = 0) {
   try {
     const d = await getJSON(`/api/decode/${id}?lang=${getLang()}`);
     if (d.stage === "ready") return renderStory(d.result);
-    if (d.stage === "error") return fail(d.message);
+    if (d.stage === "error") return fail(d);
     setStage(d.stage, d);
-  } catch (e) { if (tries > 5) return fail("Can't reach the server. Check your connection."); }
+  } catch (e) { if (tries > 5) return fail(t("decode_fail")); }
   setTimeout(() => poll(id, fail, tries + 1), 1200);
 }
 
@@ -865,6 +870,7 @@ function route() {
   const prev = current.name;
   if (prev === "home") scrollMemo.home = window.scrollY;
   const h = location.hash.replace(/^#\/?/, "").split("/");
+  if (h[0] === "s" && !/^[0-9a-f]{12}$/.test(h[1] || "")) h.splice(0, 2, "c", store.get("cat", "tech"));  // bad story id
   const go = h[0] === "s" && h[1] ? () => { story(h[1]); window.scrollTo(0, 0); }
     : h[0] === "settings" ? () => { settingsView(); window.scrollTo(0, 0); }
     : () => { home(h[0] === "c" ? h[1] : undefined); window.scrollTo(0, scrollMemo.home || 0); };
@@ -905,7 +911,7 @@ setupSwipe();
 
 // decoded://s/<id> from the widget or a notification opens that story
 function openLink(url) {
-  const m = /^decoded:\/\/s\/([\w-]+)/.exec(url || "");
+  const m = /^decoded:\/\/s\/([0-9a-f]{12})\b/.exec(url || "");
   if (m) { if (current.name === "story") trail.push(current.id); location.hash = `#/s/${m[1]}`; }
   else if (/^decoded:\/\//.test(url || "") && current.name !== "home") location.hash = `#/c/${store.get("cat", "tech")}`;
 }

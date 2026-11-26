@@ -34,6 +34,25 @@ async def get_json(r: aioredis.Redis, key: str):
     return json.loads(v) if v else None
 
 
+def _img_key(url: str) -> str:
+    import hashlib
+    return "imgok:" + hashlib.sha1(url.encode()).hexdigest()[:20]
+
+
+async def allow_images(r: aioredis.Redis, stories: list[dict]) -> None:
+    """Remember photo URLs the server attached to stories; only these may go through /api/img."""
+    urls = [s.get("image", "") for s in stories if str(s.get("image", "")).startswith(("http://", "https://"))]
+    if urls:
+        pipe = r.pipeline()
+        for u in urls:
+            pipe.set(_img_key(u), "1", ex=8 * 24 * 3600)
+        await pipe.execute()
+
+
+async def image_allowed(r: aioredis.Redis, url: str) -> bool:
+    return bool(await r.exists(_img_key(url)))
+
+
 def _ist_day() -> str:
     from datetime import datetime, timedelta, timezone
     return datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
@@ -88,6 +107,7 @@ async def ingest(r: aioredis.Redis, category: str, rotate: bool = False) -> dict
             from .images import add_missing_images
             log["images_added"] = await add_missing_images(new, r)
         log["with_image"] = sum(1 for s in new if s.get("image"))
+        await allow_images(r, new)
         retired = old if rotate else [o for o in old if not _seen(o["title"], new)]
         archive = [_brief(o, now) for o in retired if not _seen(o["title"], archive)] + archive
         pipe = r.pipeline()

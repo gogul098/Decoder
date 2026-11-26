@@ -127,6 +127,17 @@ class Balancer:
                 return lane
         raise NoCapacity()
 
+    async def _respect_limits(self, lane: Lane, h) -> None:
+        """Rest a lane before Groq would refuse it: out of requests, or too few tokens left for another decode."""
+        if h.get("x-ratelimit-remaining-requests") == "0":
+            await self._cool(lane, _seconds(h.get("x-ratelimit-reset-requests"), 30))
+        left = h.get("x-ratelimit-remaining-tokens")
+        try:
+            if left is not None and int(float(left)) < TOKENS_PER_DECODE:
+                await self._cool(lane, _seconds(h.get("x-ratelimit-reset-tokens"), 20))
+        except ValueError:
+            pass
+
     async def _cool(self, lane: Lane, seconds: float) -> None:
         await self.r.set(lane.k("cool"), "1", ex=max(1, int(seconds)))
 
@@ -187,20 +198,29 @@ class Balancer:
             return parse_json(mock_llm_answer(lane.spec.model))
         body = {"model": lane.spec.model, "messages": messages, "temperature": 0.6,
                 "max_tokens": 3200, "response_format": {"type": "json_object"}}
-        for _ in range(2):
+        if "gpt-oss" in lane.spec.model:
+            body["reasoning_effort"] = "low"     # keeps reasoning tokens (and the 8K TPM budget) small
+        for _ in range(3):
             try:
                 r = await self.http.post(f"{settings.groq_base}/chat/completions", json=body,
                                          headers={"Authorization": f"Bearer {lane.key}"})
             except httpx.HTTPError as e:
                 await self._cool(lane, 10)
                 raise LLMError(f"network: {e}")
+            if r.status_code == 400 and "reasoning_effort" in body:
+                body.pop("reasoning_effort")     # model doesn't take the parameter; retry without it
+                continue
             if r.status_code == 400 and "response_format" in body:
                 body.pop("response_format")      # some models reject JSON mode; retry in plain mode
                 continue
             break
         if r.status_code == 429:
-            await self._cool(lane, float(r.headers.get("retry-after", "20") or 20))
+            await self._cool(lane, _seconds(r.headers.get("retry-after"), 20))
             raise LLMError("rate limited")
+        if r.status_code == 413:
+            # request bigger than this lane's tokens-per-minute budget: rest the lane for a minute
+            await self._cool(lane, 60)
+            raise LLMError("request too large for lane")
         if r.status_code in (404, 410):
             await self._cool(lane, 3600)          # model retired
             raise LLMError(f"model gone: {r.status_code}")
@@ -209,12 +229,41 @@ class Balancer:
             raise LLMError(f"server {r.status_code}")
         if r.status_code >= 400:
             raise LLMError(f"http {r.status_code}: {r.text[:200]}")
-        if r.headers.get("x-ratelimit-remaining-requests") == "0":
-            await self._cool(lane, 30)
+        await self._respect_limits(lane, r.headers)
         try:
             return parse_json(r.json()["choices"][0]["message"]["content"])
         except Exception as e:
             raise LLMError(f"bad output: {e}")
+
+
+TOKENS_PER_DECODE = 4500   # prompt + answer of one decode, roughly
+
+
+def _seconds(value, default: float) -> float:
+    """Groq reset headers look like "20", "7.66s", "2m59.56s" or "120ms"."""
+    if not value:
+        return default
+    v = str(value).strip()
+    try:
+        return max(1.0, min(3600.0, float(v)))
+    except ValueError:
+        pass
+    total, num = 0.0, ""
+    i = 0
+    while i < len(v):
+        c = v[i]
+        if c.isdigit() or c == ".":
+            num += c
+        elif v.startswith("ms", i):
+            total += float(num or 0) / 1000; num = ""; i += 1
+        elif c in "hms":
+            total += float(num or 0) * {"h": 3600, "m": 60, "s": 1}[c]; num = ""
+        else:
+            return default
+        i += 1
+    if num:
+        total += float(num)
+    return max(1.0, min(3600.0, total)) if total else default
 
 
 def parse_json(text: str) -> dict:
