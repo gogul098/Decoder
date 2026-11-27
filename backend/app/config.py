@@ -44,6 +44,10 @@ class Settings:
     # Several keys are allowed (e.g. from different Groq orgs) — each key×model is its own lane.
     groq_keys: list[str] = field(default_factory=lambda: _list("GROQ_API_KEYS", os.getenv("GROQ_API_KEY", "")))
     groq_base: str = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+    # App updates come from this repo's "latest" release. Set GITHUB_TOKEN (fine-grained, read-only
+    # "Contents" on this one repo) once the repo is private.
+    github_repo: str = os.getenv("GITHUB_REPO", "gogul098/Decoder")
+    github_token: str = os.getenv("GITHUB_TOKEN", "")
     models: list[ModelSpec] = field(default_factory=_models)
     llm_mock: bool = os.getenv("LLM_MOCK", "0") == "1"          # offline testing
     news_mock: bool = os.getenv("NEWS_MOCK", "0") == "1"        # offline testing

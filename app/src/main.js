@@ -281,9 +281,11 @@ async function checkConfig() {
 
 async function checkUpdate({ manual = false } = {}) {
   if (!isNative && !manual) return null;       // the web preview has nothing to install
-  const info = await httpJSON(`https://github.com/${REPO}/releases/download/latest/update.json?t=${Date.now()}`);
+  if (!apiBase()) return null;
+  const info = await httpJSON(`${apiBase()}/api/update?t=${Date.now()}`);   // the server reads our (private) GitHub release
   if (!(info.build > BUILD)) return { info, newer: false };
-  if (!String(info.apk_url || "").startsWith(`https://github.com/${REPO}/releases/`)) return { info, newer: false };   // only our own releases
+  if (!/^\/api\/apk(\?b=\d+)?$/.test(String(info.apk_url || ""))) return { info, newer: false };   // only our own server's download
+  info.apk_url = apiBase() + info.apk_url;
   const snoozed = JSON.parse(store.get("update_snooze", "{}"));
   if (!manual && snoozed.build === info.build && Date.now() - snoozed.at < 12 * 3600e3) return { info, newer: true };
   showUpdate(info);

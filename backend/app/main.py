@@ -412,6 +412,30 @@ async def image_proxy(u: str, request: Request):
                                                       "X-Content-Type-Options": "nosniff"})
 
 
+@app.get("/api/update")
+async def app_update(request: Request):
+    """The newest app build (update.json), read from the GitHub release, private or public."""
+    from fastapi.responses import JSONResponse as J
+    from . import releases
+    try:
+        info = await releases.latest(request.app.state.bal.http)
+    except (releases.Unavailable, httpx.HTTPError, ValueError):
+        raise HTTPException(503, "update info unavailable")
+    return J(info, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/apk")
+async def app_apk(request: Request):
+    """Download the newest APK: a redirect to GitHub's short-lived signed link."""
+    from fastapi.responses import RedirectResponse
+    from . import releases
+    try:
+        link = await releases.apk_link(request.app.state.bal.http)
+    except (releases.Unavailable, httpx.HTTPError):
+        raise HTTPException(503, "download unavailable")
+    return RedirectResponse(link, status_code=302, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/debug")
 async def debug(request: Request):
     """Is the server reaching the RSS feeds, and is the ingester publishing to Redis?

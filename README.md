@@ -100,8 +100,10 @@ docker compose up -d --build         # nginx + 3 API + 3 workers + Redis
 ## Updates: new APKs and server moves
 
 **New app version.** Push changes under `app/` to `main`. GitHub Actions builds a new APK, numbers it
-(`1.0.<build>`), and publishes it with `update.json` in the **latest** release. Every installed app checks
-`update.json` when it opens or comes back to the foreground (at most every 10 minutes). When a newer build
+(`1.0.<build>`), and publishes it with `update.json` in the **latest** release. The server relays that
+release at `/api/update` and `/api/apk`, so the repo can stay private: set `GITHUB_TOKEN` on Render to a
+fine-grained token with read-only **Contents** access to this repo. The link to share the app is
+`<your server>/api/apk`. Every installed app checks `/api/update` when it opens or comes back to the foreground (at most every 10 minutes). When a newer build
 exists, it shows an **Update available** card with the first paragraph of your commit message as
 "what's new". **Download update** fetches the APK, which you then open to install over the old app.
 "Later" snoozes it for 12 hours. Settings also has **Check for updates**. To write the notes yourself,
@@ -148,6 +150,7 @@ cd app && npm install && VITE_API_BASE=http://localhost:8000 npm run dev
 | `TRANSLATE_DAILY_CAP` | `600` | Translation batches per day; past it, stories stay in English |
 | `STREAMS_PER_IP` | `8` | Live streams one IP can hold open |
 | `CORS_ORIGINS` | the app's own origins | Web pages allowed to call the API |
+| `GITHUB_TOKEN` | none | Read-only token for the private repo's releases (app updates) |
 | `DEBUG_TOKEN` | none | Unlocks `/api/debug` and the detailed `/api/health` (`?token=…` or `X-Debug-Token`) |
 
 ## Security
